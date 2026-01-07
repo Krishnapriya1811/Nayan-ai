@@ -1,0 +1,186 @@
+/* General Styles */
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background-color: #ffffff;
+    color: #212529;
+    line-height: 1.6;
+}
+
+/* Hero Section */
+.hero-section {
+    background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%);
+    padding: 80px 0;
+}
+
+.hero-section h1 {
+    color: #ffffff;
+    font-weight: 700;
+    margin-bottom: 20px;
+}
+
+.hero-section .lead {
+    color: #ffffff;
+    font-size: 1.3rem;
+    font-weight: 500;
+}
+
+.hero-section p {
+    color: #f0f0f0;
+    font-size: 1rem;
+}
+
+.eye-icon-large {
+    opacity: 1;
+    color: #ffffff;
+}
+
+/* Navbar */
+.navbar {
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+}
+
+.navbar-brand {
+    font-size: 1.5rem;
+    font-weight: 700;
+}
+
+footer {
+    margin-top: 40px;
+    padding: 30px 0;
+    background-color: #f8f9fa;
+    color: #6c757d;
+    border-top: 1px solid #dee2e6;
+}
+
+/* Card Styles */
+.card {
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+    border: none;
+    border-radius: 12px;
+    transition: transform 0.3s, box-shadow 0.3s;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 8px 20px rgba(0, 0, 0, 0.12);
+}
+
+.card-title {
+    font-weight: 700;
+    color: #212529;
+}
+
+.card-body {
+    padding: 1.5rem;
+}
+
+/* Team Card */
+.team-card {
+    background-color: #ffffff;
+    transition: all 0.3s ease;
+}
+
+.team-avatar {
+    width: 70px;
+    height: 70px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    margin: 0 auto;
+    font-size: 2rem;
+}
+
+/* Button Styles */
+.btn-primary {
+    background-color: #0066cc;
+    border-color: #0066cc;
+    padding: 0.6rem 1.5rem;
+    font-weight: 600;
+    transition: all 0.3s;
+}
+
+.btn-primary:hover {
+    background-color: #0052a3;
+    border-color: #0052a3;
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 102, 204, 0.3);
+}
+
+.btn-light {
+    background-color: #ffffff;
+    color: #0066cc;
+    font-weight: 600;
+}
+
+.btn-light:hover {
+    background-color: #f0f0f0;
+    color: #0052a3;
+}
+
+.btn-outline-light {
+    color: #ffffff;
+    border-color: #ffffff;
+    font-weight: 600;
+}
+
+.btn-outline-light:hover {
+    background-color: #ffffff;
+    color: #0066cc;
+}
+
+/* Progress Bar */
+.progress-bar {
+    background-color: #28a745;
+}
+
+/* Alerts */
+.alert {
+    border-radius: 8px;
+    border: none;
+    font-size: 0.95rem;
+}
+
+.alert-warning {
+    background-color: #fff3cd;
+    color: #856404;
+}
+
+.alert-info {
+    background-color: #d1ecf1;
+    color: #0c5460;
+}
+
+.alert-success {
+    background-color: #d4edda;
+    color: #155724;
+}
+
+/* Sections */
+section {
+    padding: 60px 0;
+}
+
+.bg-light {
+    background-color: #f8f9fa !important;
+}
+
+/* Typography */
+h1, h2, h3, h4, h5, h6 {
+    color: #212529;
+    font-weight: 700;
+}
+
+.text-primary {
+    color: #0066cc !important;
+}
+
+.text-muted {
+    color: #6c757d !important;
+}
+
+/* Container */
+.container {
+    max-width: 1200px;
+    padding: 0 15px;
+}

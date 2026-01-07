@@ -1,0 +1,152 @@
+╔════════════════════════════════════════════════════════════════════╗
+║           NAYAN-AI - QUICK START (2 MINUTES)                        ║
+╚════════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🚀 STEP 1: Start Backend Server
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Method A (Easiest - Windows):
+   Double-click: START_BACKEND.bat
+   ✓ Server starts automatically on port 5000
+
+Method B (Command Line):
+   cd backend
+   python app.py
+   ✓ Wait for banner message:
+     "Running on http://0.0.0.0:5000"
+
+Method C (First Time Setup):
+   cd backend
+   pip install -r requirements.txt
+   python app.py
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+🌐 STEP 2: Open Frontend
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Copy and paste in browser address bar:
+   file:///c:/Users/krishnapriyas/OneDrive/Desktop/NAYAN-AI/Nayan-ai/frontend/login.html
+
+OR
+
+Navigate to: frontend folder → right-click login.html → Open with → Your Browser
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+👤 STEP 3: Login
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Click "Demo Login" button
+   ✓ Automatically logs in with demo credentials
+   ✓ Redirects to patient information form
+
+OR
+
+Manual Login:
+   Email:    demo@nayan.ai
+   Password: demo123
+   Click Login
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📋 STEP 4: Enter Patient Information
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Fill out the form (all fields):
+   • Full Name
+   • Age
+   • Gender
+   • Phone
+   • Email
+   • Medical History
+   • Family History
+
+Click "Save Patient Data"
+   ✓ Data saved to database
+   ✓ Screening modules appear
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📹 STEP 5: Run Screenings
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Three modules available:
+
+1️⃣  GLAUCOMA (IOP Measurement)
+   Click "Take Measurement"
+   ✓ Shows IOP value (10-30 mmHg)
+   ✓ Shows Risk Level (Low/Normal/High)
+   ✓ Enable "Auto-Refresh" for continuous measurement
+
+2️⃣  CATARACT DETECTION
+   Click "Select Image"
+   Upload a photo of eye (JPG/PNG, max 10MB)
+   ✓ Shows Result (Normal or Risk)
+   ✓ Shows Confidence Score
+   ✓ Shows Feature Metrics
+   ✓ Shows Image Preview
+
+3️⃣  DRY EYE ANALYSIS
+   Click "Select Video"
+   Upload a video of blinking (MP4/AVI, max 100MB)
+   ✓ Shows Result (Normal or Risk)
+   ✓ Shows Blink Rate (BPM)
+   ✓ Shows Blink Metrics
+   ✓ Shows Recommendations
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+📊 STEP 6: View Results
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Click "History" tab
+   ✓ See all screening results
+   ✓ Download as JSON report
+   ✓ Print results
+
+Three tabs for each screening type:
+   • Cataract Results
+   • Dry Eye Results
+   • Glaucoma Results
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ YOU'RE DONE!
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+System is fully functional and ready to use!
+
+For detailed docs: See README.md or SETUP.md
+For troubleshooting: See INTEGRATION_REPORT.txt
+
+═══════════════════════════════════════════════════════════════════
+
+❓ QUICK TIPS
+
+Q: Backend not starting?
+A: 1) Run: cd backend & python app.py
+   2) Check: netstat -ano | findstr ":5000"
+   3) Kill if needed: taskkill /PID {PID} /F
+
+Q: Browser can't reach frontend?
+A: Copy full path to login.html into address bar
+   Or open in File Explorer and double-click
+
+Q: Can't upload images/videos?
+A: Check file size (Cataract max 10MB, Dry Eye max 100MB)
+   Use common formats: JPG/PNG for images, MP4/AVI for videos
+
+Q: Results not showing?
+A: Make sure backend is running
+   Check browser console (F12) for errors
+   Try reloading page
+
+Q: Want to test with sample images/videos?
+A: Use test_integration.py - it creates sample data automatically
+
+═══════════════════════════════════════════════════════════════════
+                    Happy Screening! 🎉
+═══════════════════════════════════════════════════════════════════

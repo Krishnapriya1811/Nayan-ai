@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Cataract Detection | NAYAN-AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="assets/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="index.html">
+                <i class="bi bi-eye-fill me-2"></i>NAYAN-AI
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="index.html"><i class="bi bi-house-door me-1"></i>Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="glaucoma.html"><i class="bi bi-activity me-1"></i>Glaucoma</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="cataract.html"><i class="bi bi-camera me-1"></i>Cataract</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="dryeye.html"><i class="bi bi-droplet me-1"></i>Dry Eye</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="history.html"><i class="bi bi-clock-history me-1"></i>History</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Disclaimer -->
+    <div class="alert alert-warning mb-0 rounded-0 text-center small">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+        <strong>Disclaimer:</strong> Screening support only. Not a medical diagnosis. Consult an ophthalmologist.
+    </div>
+
+    <!-- Page Header -->
+    <section class="bg-warning py-4">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col">
+                    <h1 class="mb-1"><i class="bi bi-camera me-2"></i>Cataract Detection</h1>
+                    <p class="mb-0 opacity-75">AI-Powered Eye Image Analysis using MobileNetV2</p>
+                </div>
+                <div class="col-auto">
+                    <span class="badge bg-dark fs-6">Step 2 of 3</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Content -->
+    <section class="py-4">
+        <div class="container">
+            <div class="row g-4">
+                <!-- Upload Section -->
+                <div class="col-lg-5">
+                    <!-- Instructions -->
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-header bg-warning">
+                            <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Instructions</h5>
+                        </div>
+                        <div class="card-body">
+                            <ol class="mb-3">
+                                <li class="mb-2">Take a clear photo of the eye or upload an existing image</li>
+                                <li class="mb-2">Ensure good lighting and focus on the eye area</li>
+                                <li class="mb-2">Preview the image before uploading</li>
+                                <li class="mb-2">Click "Upload & Predict" to analyze</li>
+                            </ol>
+                            <div class="alert alert-info small mb-0">
+                                <i class="bi bi-lightbulb-fill me-1"></i>
+                                <strong>Tips:</strong> Use natural lighting. Image should clearly show the eye. Maximum file size: 10MB.
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Upload Card -->
+                    <div class="card border-0 shadow-sm">
+                        <div class="card-header bg-light">
+                            <h5 class="mb-0"><i class="bi bi-upload me-2"></i>Upload Eye Image</h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- File Input -->
+                            <div class="mb-3">
+                                <label for="imageInput" class="form-label">Select or capture image:</label>
+                                <input class="form-control form-control-lg" type="file" id="imageInput" 
+                                       accept="image/*" capture="environment">
+                                <div class="form-text">Accepted formats: JPG, PNG, WEBP (Max 10MB)</div>
+                            </div>
+
+                            <!-- Image Preview -->
+                            <div class="mb-3" id="previewContainer" style="display: none;">
+                                <label class="form-label">Preview:</label>
+                                <div class="border rounded p-2 bg-light text-center">
+                                    <img id="imagePreview" class="img-fluid rounded" style="max-height: 300px;" alt="Preview">
+                                </div>
+                                <div class="mt-2 small text-muted">
+                                    <span id="fileInfo"></span>
+                                </div>
+                            </div>
+
+                            <!-- Upload Button -->
+                            <button class="btn btn-warning btn-lg w-100" id="uploadBtn" disabled>
+                                <i class="bi bi-cloud-upload me-1"></i>Upload & Predict
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Results Section -->
+                <div class="col-lg-7">
+                    <!-- Loading State -->
+                    <div class="card border-0 shadow-sm" id="loadingCard" style="display: none;">
+                        <div class="card-body text-center py-5">
+                            <div class="spinner-border text-warning mb-3" style="width: 4rem; height: 4rem;" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <h4>Analyzing Image...</h4>
+                            <p class="text-muted">Our AI model is processing your eye image.</p>
+                            <div class="progress" style="height: 10px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" 
+                                     style="width: 100%"></div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Result Card -->
+                    <div class="card border-0 shadow-sm" id="resultCard" style="display: none;">
+                        <div class="card-header bg-light">
+                            <h5 class="mb-0"><i class="bi bi-clipboard-check me-2"></i>Analysis Result</h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- Result Badge -->
+                            <div class="text-center mb-4">
+                                <span class="badge fs-3 px-4 py-3" id="resultBadge">--</span>
+                            </div>
+
+                            <!-- Confidence -->
+                            <div class="mb-4">
+                                <div class="d-flex justify-content-between mb-1">
+                                    <span class="fw-bold">Confidence Level</span>
+                                    <span id="confidenceValue">--</span>
+                                </div>
+                                <div class="progress" style="height: 25px;">
+                                    <div class="progress-bar" id="confidenceBar" role="progressbar" 
+                                         style="width: 0%"></div>
+                                </div>
+                            </div>
+
+                            <!-- Probability Table -->
+                            <div class="mb-4">
+                                <h6><i class="bi bi-bar-chart me-1"></i>Probability Distribution</h6>
+                                <table class="table table-bordered table-sm">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Class</th>
+                                            <th>Probability</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="probsTable">
+                                        <tr>
+                                            <td>Normal</td>
+                                            <td id="probNormal">--</td>
+                                        </tr>
+                                        <tr>
+                                            <td>Cataract</td>
+                                            <td id="probCataract">--</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Uploaded Image -->
+                            <div class="mb-4">
+                                <h6><i class="bi bi-image me-1"></i>Analyzed Image</h6>
+                                <div class="border rounded p-2 bg-light text-center">
+                                    <img id="uploadedImage" class="img-fluid rounded" style="max-height: 200px;" alt="Uploaded">
+                                </div>
+                            </div>
+
+                            <!-- Timestamp -->
+                            <div class="d-flex justify-content-between text-muted small">
+                                <span><i class="bi bi-clock me-1"></i>Timestamp: <span id="resultTimestamp">--</span></span>
+                                <span class="text-success"><i class="bi bi-check-circle me-1"></i>Result saved</span>
+                            </div>
+                        </div>
+
+                        <!-- Interpretation -->
+                        <div class="card-footer bg-light">
+                            <div class="alert alert-secondary mb-0">
+                                <h6><i class="bi bi-info-circle me-1"></i>Interpretation</h6>
+                                <p class="mb-0 small" id="interpretationText">
+                                    If risk is detected, recommend clinical exam with an ophthalmologist for proper diagnosis.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Initial State -->
+                    <div class="card border-0 shadow-sm" id="initialCard">
+                        <div class="card-body text-center py-5">
+                            <i class="bi bi-camera display-1 text-muted mb-3"></i>
+                            <h4 class="text-muted">No Image Selected</h4>
+                            <p class="text-muted">Upload an eye image to begin cataract screening analysis.</p>
+                        </div>
+                    </div>
+
+                    <!-- Error Alert -->
+                    <div class="alert alert-danger mt-3" id="errorAlert" style="display: none;">
+                        <i class="bi bi-exclamation-octagon me-2"></i>
+                        <span id="errorMessage">An error occurred.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigation -->
+            <div class="card border-0 shadow-sm mt-4 bg-light">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col-auto">
+                            <a href="glaucoma.html" class="btn btn-outline-danger">
+                                <i class="bi bi-arrow-left me-1"></i>Back: Glaucoma
+                            </a>
+                        </div>
+                        <div class="col text-center">
+                            <span class="text-muted">Step 2 of 3</span>
+                        </div>
+                        <div class="col-auto">
+                            <a href="dryeye.html" class="btn btn-info text-white">
+                                Next: Dry Eye <i class="bi bi-arrow-right ms-1"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-dark text-white py-3 mt-5">
+        <div class="container text-center">
+            <p class="small mb-0">© 2026 NAYAN-AI | AI-Powered Eye Screening System</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="assets/js/app.js"></script>
+    <script src="assets/js/cataract.js"></script>
+</body>
+</html>

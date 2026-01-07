@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Patient Input - NAYAN-AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="assets/css/style.css">
+</head>
+<body>
+    <nav class="navbar navbar-expand-lg navbar-light bg-light">
+        <div class="container-fluid">
+            <a class="navbar-brand" href="index.html">NAYAN-AI</a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav">
+                    <li class="nav-item">
+                        <a class="nav-link" href="index.html">Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="glaucoma.html">Glaucoma Detection</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="cataract.html">Cataract Detection</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="dryeye.html">Dry Eye Detection</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="history.html">History</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h1 class="text-center">Patient Input</h1>
+        <p class="text-center">Please provide your details and concerns below.</p>
+
+        <form id="patient-input-form">
+            <div class="mb-3">
+                <label for="patient-name" class="form-label">Name</label>
+                <input type="text" class="form-control" id="patient-name" placeholder="Enter your name" required>
+            </div>
+            <div class="mb-3">
+                <label for="patient-age" class="form-label">Age</label>
+                <input type="number" class="form-control" id="patient-age" placeholder="Enter your age" required>
+            </div>
+            <div class="mb-3">
+                <label for="patient-concern" class="form-label">Concern</label>
+                <textarea class="form-control" id="patient-concern" rows="3" placeholder="Describe your concern" required></textarea>
+            </div>
+            <div class="text-center">
+                <button type="submit" class="btn btn-primary">Submit</button>
+            </div>
+        </form>
+
+        <div class="text-center mt-4">
+            <a href="glaucoma.html" class="btn btn-primary">Next: Glaucoma Detection</a>
+        </div>
+    </div>
+
+    <footer class="text-center mt-4">
+        <p>Screening support only. Not a medical diagnosis. Consult an ophthalmologist.</p>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

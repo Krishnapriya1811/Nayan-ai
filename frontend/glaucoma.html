@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Glaucoma Screening | NAYAN-AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="assets/css/style.css" rel="stylesheet">
+</head>
+<body>
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="index.html">
+                <i class="bi bi-eye-fill me-2"></i>NAYAN-AI
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="index.html"><i class="bi bi-house-door me-1"></i>Home</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link active" href="glaucoma.html"><i class="bi bi-activity me-1"></i>Glaucoma</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="cataract.html"><i class="bi bi-camera me-1"></i>Cataract</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="dryeye.html"><i class="bi bi-droplet me-1"></i>Dry Eye</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="history.html"><i class="bi bi-clock-history me-1"></i>History</a>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <!-- Disclaimer -->
+    <div class="alert alert-warning mb-0 rounded-0 text-center small">
+        <i class="bi bi-exclamation-triangle-fill me-1"></i>
+        <strong>Disclaimer:</strong> Screening support only. Not a medical diagnosis. Consult an ophthalmologist.
+    </div>
+
+    <!-- Page Header -->
+    <section class="bg-danger text-white py-4">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col">
+                    <h1 class="mb-1"><i class="bi bi-activity me-2"></i>Glaucoma Screening</h1>
+                    <p class="mb-0 opacity-75">IOP Proxy Measurement via Hardware Sensors</p>
+                </div>
+                <div class="col-auto">
+                    <span class="badge bg-light text-danger fs-6">Step 1 of 3</span>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main Content -->
+    <section class="py-4">
+        <div class="container">
+            <div class="row g-4">
+                <!-- Instructions Card -->
+                <div class="col-lg-4">
+                    <div class="card border-0 shadow-sm h-100">
+                        <div class="card-header bg-danger text-white">
+                            <h5 class="mb-0"><i class="bi bi-info-circle me-2"></i>Instructions</h5>
+                        </div>
+                        <div class="card-body">
+                            <ol class="mb-3">
+                                <li class="mb-2">Ensure the ESP32 hardware device is powered on</li>
+                                <li class="mb-2">Position the sensor properly on the eye area</li>
+                                <li class="mb-2">Click "Take Measurement" or wait for auto-refresh</li>
+                                <li class="mb-2">Review the IOP proxy reading and risk assessment</li>
+                            </ol>
+                            <div class="alert alert-info small mb-0">
+                                <i class="bi bi-lightbulb-fill me-1"></i>
+                                <strong>Tip:</strong> The system auto-refreshes every 3 seconds to show the latest reading.
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Hardware Status & Reading -->
+                <div class="col-lg-8">
+                    <!-- Hardware Status -->
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-center">
+                                <div>
+                                    <h5 class="mb-1"><i class="bi bi-cpu me-2"></i>Hardware Status</h5>
+                                    <p class="text-muted small mb-0">ESP32 Glaucoma Measurement Device</p>
+                                </div>
+                                <div id="hardwareStatus">
+                                    <span class="badge bg-secondary fs-6">
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                        Checking...
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Controls -->
+                    <div class="card border-0 shadow-sm mb-4">
+                        <div class="card-body">
+                            <div class="row g-3 align-items-center">
+                                <div class="col-md-6">
+                                    <button class="btn btn-danger btn-lg w-100" id="measureBtn">
+                                        <i class="bi bi-play-fill me-1"></i>Take Measurement
+                                    </button>
+                                </div>
+                                <div class="col-md-6">
+                                    <button class="btn btn-outline-secondary btn-lg w-100" id="refreshBtn">
+                                        <i class="bi bi-arrow-clockwise me-1"></i>Refresh Now
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="form-check form-switch mt-3">
+                                <input class="form-check-input" type="checkbox" id="autoRefreshToggle" checked>
+                                <label class="form-check-label" for="autoRefreshToggle">
+                                    Auto-refresh every 3 seconds
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Measurement Result -->
+                    <div class="card border-0 shadow-sm" id="resultCard" style="display: none;">
+                        <div class="card-header bg-light">
+                            <h5 class="mb-0"><i class="bi bi-graph-up me-2"></i>Latest Measurement</h5>
+                        </div>
+                        <div class="card-body">
+                            <!-- Risk Label -->
+                            <div class="text-center mb-4" id="riskLabelContainer">
+                                <span class="badge fs-4 px-4 py-2" id="riskLabel">--</span>
+                            </div>
+
+                            <!-- IOP Gauge Display -->
+                            <div class="row mb-4">
+                                <div class="col-md-6 mx-auto">
+                                    <div class="iop-gauge text-center p-4 rounded-3 bg-light">
+                                        <h6 class="text-muted mb-2">IOP Proxy Value (k)</h6>
+                                        <div class="display-3 fw-bold" id="kProxyValue">--</div>
+                                        <small class="text-muted">mmHg equivalent proxy</small>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Detailed Readings -->
+                            <div class="table-responsive">
+                                <table class="table table-bordered mb-0">
+                                    <tbody>
+                                        <tr>
+                                            <th class="bg-light" style="width: 40%;">Device ID</th>
+                                            <td id="deviceId">--</td>
+                                        </tr>
+                                        <tr>
+                                            <th class="bg-light">Delta (mm)</th>
+                                            <td id="deltaMm">--</td>
+                                        </tr>
+                                        <tr>
+                                            <th class="bg-light">K Proxy</th>
+                                            <td id="kProxy">--</td>
+                                        </tr>
+                                        <tr>
+                                            <th class="bg-light">Timestamp</th>
+                                            <td id="timestamp">--</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            <!-- Interpretation -->
+                            <div class="alert alert-secondary mt-4 mb-0">
+                                <h6><i class="bi bi-info-circle me-1"></i>Interpretation</h6>
+                                <p class="mb-0 small" id="interpretationText">
+                                    Elevated proxy suggests possible high IOP; clinical confirmation required.
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Loading State -->
+                    <div class="card border-0 shadow-sm" id="loadingCard" style="display: none;">
+                        <div class="card-body text-center py-5">
+                            <div class="spinner-border text-danger mb-3" role="status">
+                                <span class="visually-hidden">Loading...</span>
+                            </div>
+                            <h5>Processing Measurement...</h5>
+                            <p class="text-muted">Please wait while we retrieve the reading.</p>
+                        </div>
+                    </div>
+
+                    <!-- Error State -->
+                    <div class="alert alert-danger" id="errorAlert" style="display: none;">
+                        <i class="bi bi-exclamation-octagon me-2"></i>
+                        <span id="errorMessage">An error occurred.</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Navigation to Next Step -->
+            <div class="card border-0 shadow-sm mt-4 bg-light">
+                <div class="card-body">
+                    <div class="row align-items-center">
+                        <div class="col">
+                            <h5 class="mb-1">Continue to Next Screening</h5>
+                            <p class="text-muted mb-0">Proceed to Cataract Detection</p>
+                        </div>
+                        <div class="col-auto">
+                            <a href="cataract.html" class="btn btn-warning btn-lg">
+                                Next: Cataract <i class="bi bi-arrow-right ms-1"></i>
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-dark text-white py-3 mt-5">
+        <div class="container text-center">
+            <p class="small mb-0">© 2026 NAYAN-AI | AI-Powered Eye Screening System</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="assets/js/app.js"></script>
+    <script src="assets/js/glaucoma.js"></script>
+</body>
+</html>
