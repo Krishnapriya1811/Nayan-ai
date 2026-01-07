@@ -1,0 +1,37 @@
+# Nayan-AI Backend Requirements
+# Integrated Eye Screening System v1.0
+# Tested on Windows with Python 3.9+
+
+# Core Dependencies
+numpy>=1.21.0
+opencv-python>=4.5.0
+Pillow>=10.0.0
+
+# Flask & Web
+Flask>=2.3.0
+Flask-CORS>=4.0.0
+Flask-SocketIO>=5.3.0
+python-socketio>=5.9.0
+python-engineio>=4.7.0
+Werkzeug>=2.3.0
+
+# Database
+# SQLite3 is built-in with Python
+
+# Image/Video Processing
+scikit-image>=0.19.0
+scipy>=1.8.0
+
+# Deep Learning (Optional - for future ML models)
+tensorflow>=2.12.0
+keras>=2.12.0
+tf-keras>=2.12.0
+h5py>=3.10.0
+
+# Utils
+python-dotenv>=1.0.0
+requests>=2.31.0
+
+# Production server (instead of Flask development server)
+gunicorn>=21.0.0
+eventlet>=0.33.0
