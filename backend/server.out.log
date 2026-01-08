@@ -1,0 +1,12 @@
+==================================================
+NAYAN-AI BACKEND SERVER
+Eye Screening System v1.0
+==================================================
+REST API:  http://127.0.0.1:5000
+WebSocket: ws://127.0.0.1:5000
+Database:  SQLite3 (nayan_ai.db)
+==================================================
+Server starting... (Press Ctrl+C to stop)
+==================================================
+ * Serving Flask app 'app'
+ * Debug mode: off

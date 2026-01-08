@@ -1,16 +1,40 @@
 // Main app-level JS - Complete authentication and patient data flow
 
-const API_BASE = 'http://localhost:5000/api';
+// Use same-origin API when served by the backend.
+// NOTE: use `var` so it can be safely re-declared across multiple script files.
+var API_BASE = `${window.location.origin}/api`;
 
 // Check if user is logged in, redirect to login if not
 document.addEventListener('DOMContentLoaded', function() {
     const currentPage = window.location.pathname;
+
+    // Restore login from localStorage if user opted for "Remember me".
+    if (!sessionStorage.getItem('userId')) {
+        const remembered = localStorage.getItem('rememberMe') === 'true';
+        if (remembered) {
+            const userId = localStorage.getItem('userId');
+            const userName = localStorage.getItem('userName');
+            const userEmail = localStorage.getItem('userEmail');
+            if (userId) {
+                sessionStorage.setItem('userId', userId);
+                if (userName) sessionStorage.setItem('userName', userName);
+                if (userEmail) sessionStorage.setItem('userEmail', userEmail);
+            }
+        }
+    }
     
     // List of pages that require login
-    const protectedPages = ['index.html', 'glaucoma.html', 'cataract.html', 'dryeye.html', 'history.html', 'patient_input.html'];
+    // Glaucoma UI is intentionally excluded (hardware-only).
+    const protectedPages = [
+        '/index', '/index.html',
+        '/cataract', '/cataract.html',
+        '/dryeye', '/dryeye.html',
+        '/history', '/history.html',
+        '/patient', '/patient_input', '/patient_input.html'
+    ];
     
     // Check if current page is protected
-    const isProtected = protectedPages.some(page => currentPage.includes(page));
+    const isProtected = protectedPages.some(page => currentPage === page || currentPage.endsWith(page));
     
     if (isProtected && !sessionStorage.getItem('userId')) {
         window.location.href = 'login.html';
@@ -34,6 +58,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (logoutBtn) {
         logoutBtn.addEventListener('click', function() {
             sessionStorage.clear();
+            localStorage.removeItem('rememberMe');
+            localStorage.removeItem('userId');
+            localStorage.removeItem('userName');
+            localStorage.removeItem('userEmail');
             window.location.href = 'login.html';
         });
     }
@@ -109,7 +137,7 @@ function savePatientData() {
     })
     .catch(error => {
         console.error('Error:', error);
-        showAlert('Error: Make sure backend is running at http://localhost:5000', 'danger');
+        showAlert('Error: Backend is not reachable', 'danger');
     })
     .finally(() => {
         submitBtn.disabled = false;

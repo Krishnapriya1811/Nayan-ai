@@ -24,9 +24,6 @@
                         <a class="nav-link" href="index.html"><i class="bi bi-house-door me-1"></i>Home</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="glaucoma.html"><i class="bi bi-activity me-1"></i>Glaucoma</a>
-                    </li>
-                    <li class="nav-item">
                         <a class="nav-link" href="cataract.html"><i class="bi bi-camera me-1"></i>Cataract</a>
                     </li>
                     <li class="nav-item">
@@ -74,9 +71,9 @@
                         <form id="dryeyeForm">
                             <!-- File Input -->
                             <div class="mb-4">
-                                <label for="videoInput" class="form-label fw-bold">Select Video File</label>
+                                <label for="videoInput" class="form-label fw-bold">Select or record a video</label>
                                 <div class="input-group">
-                                    <input type="file" class="form-control" id="videoInput" accept="video/*" required>
+                                    <input type="file" class="form-control" id="videoInput" accept="video/*" capture="environment" required>
                                     <label class="input-group-text" for="videoInput"><i class="bi bi-cloud-upload"></i></label>
                                 </div>
                                 <small class="text-muted d-block mt-2">Max file size: 100MB • Formats: MP4, WebM, MOV</small>

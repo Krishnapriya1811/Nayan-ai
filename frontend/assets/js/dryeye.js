@@ -1,11 +1,13 @@
 // Dry Eye Detection Page JavaScript
 // Complete API integration with backend
 
-const API_BASE = 'http://localhost:5000/api';
+// Use same-origin API when served by the backend.
+// NOTE: use `var` so it can be safely re-declared across multiple script files.
+var API_BASE = `${window.location.origin}/api`;
 
 document.addEventListener('DOMContentLoaded', function() {
     const patientId = sessionStorage.getItem('patientId');
-    
+
     if (!patientId) {
         alert('Please complete patient information first');
         window.location.href = 'index.html';
@@ -23,9 +25,13 @@ document.addEventListener('DOMContentLoaded', function() {
     const downloadBtn = document.getElementById('downloadBtn');
 
     // File input change handler
-    videoInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
-        if (file) {
+    if (videoInput) {
+        videoInput.addEventListener('change', function(e) {
+            const file = e.target.files && e.target.files[0];
+            if (!file) {
+                return;
+            }
+
             // Validate file size (max 100MB)
             const maxSize = 100 * 1024 * 1024;
             if (file.size > maxSize) {
@@ -34,30 +40,36 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            fileName.textContent = file.name;
-            videoPreview.style.display = 'block';
-        }
-    });
+            if (fileName) {
+                fileName.textContent = file.name;
+            }
+            if (videoPreview) {
+                videoPreview.style.display = 'block';
+            }
+        });
+    }
 
     // Form submission handler
-    dryeyeForm.addEventListener('submit', function(e) {
-        e.preventDefault();
+    if (dryeyeForm) {
+        dryeyeForm.addEventListener('submit', function(e) {
+            e.preventDefault();
 
-        const file = videoInput.files[0];
-        if (!file) {
-            alert('Please select a video file');
-            return;
-        }
+            const file = videoInput && videoInput.files && videoInput.files[0];
+            if (!file) {
+                alert('Please select a video file');
+                return;
+            }
 
-        uploadVideo(file);
-    });
+            uploadVideo(file);
+        });
+    }
 
     function uploadVideo(file) {
         // Show loading spinner
-        loadingSpinner.style.display = 'block';
-        resultsCard.style.display = 'none';
-        nextBtn.style.display = 'none';
-        dryeyeForm.style.display = 'none';
+        if (loadingSpinner) loadingSpinner.style.display = 'block';
+        if (resultsCard) resultsCard.style.display = 'none';
+        if (nextBtn) nextBtn.style.display = 'none';
+        if (dryeyeForm) dryeyeForm.style.display = 'none';
 
         const formData = new FormData();
         formData.append('video', file);
@@ -67,23 +79,23 @@ document.addEventListener('DOMContentLoaded', function() {
             method: 'POST',
             body: formData
         })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                displayResults(data.analysis);
-            } else {
-                alert('Analysis failed: ' + data.message);
-                dryeyeForm.style.display = 'block';
-            }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('Failed to upload video. Make sure backend is running at http://localhost:5000');
-            dryeyeForm.style.display = 'block';
-        })
-        .finally(() => {
-            loadingSpinner.style.display = 'none';
-        });
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    displayResults(data.analysis);
+                } else {
+                    alert('Analysis failed: ' + (data.message || 'Unknown error'));
+                    if (dryeyeForm) dryeyeForm.style.display = 'block';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Failed to upload video. Backend may not be available.');
+                if (dryeyeForm) dryeyeForm.style.display = 'block';
+            })
+            .finally(() => {
+                if (loadingSpinner) loadingSpinner.style.display = 'none';
+            });
     }
 
     function displayResults(data) {
@@ -96,19 +108,21 @@ document.addEventListener('DOMContentLoaded', function() {
         const timestamp = document.getElementById('timestamp');
 
         // Update risk label and color
-        riskLabel.textContent = data.label;
-        if (data.label === 'Dry Eye Risk') {
-            riskAlert.className = 'alert alert-warning mb-4';
-        } else {
-            riskAlert.className = 'alert alert-success mb-4';
+        if (riskLabel) riskLabel.textContent = data.label;
+        if (riskAlert) {
+            if (data.label === 'Dry Eye Risk') {
+                riskAlert.className = 'alert alert-warning mb-4';
+            } else {
+                riskAlert.className = 'alert alert-success mb-4';
+            }
         }
 
         // Update metrics
-        blinkCount.textContent = data.blink_count;
-        blinkRate.textContent = data.blink_rate_bpm;
-        meanIbi.textContent = data.mean_ibi_sec + 's';
-        maxEyeOpen.textContent = data.max_eye_open_sec + 's';
-        timestamp.textContent = new Date().toLocaleString();
+        if (blinkCount) blinkCount.textContent = data.blink_count;
+        if (blinkRate) blinkRate.textContent = data.blink_rate_bpm;
+        if (meanIbi) meanIbi.textContent = data.mean_ibi_sec + 's';
+        if (maxEyeOpen) maxEyeOpen.textContent = data.max_eye_open_sec + 's';
+        if (timestamp) timestamp.textContent = new Date().toLocaleString();
 
         // Store test results in session
         sessionStorage.setItem('dryEyeResults', JSON.stringify(data));
@@ -117,21 +131,21 @@ document.addEventListener('DOMContentLoaded', function() {
         updatePrintTemplate(data);
 
         // Show results card and next button
-        resultsCard.style.display = 'block';
-        nextBtn.style.display = 'block';
-        resultsCard.scrollIntoView({ behavior: 'smooth' });
+        if (resultsCard) resultsCard.style.display = 'block';
+        if (nextBtn) nextBtn.style.display = 'block';
+        if (resultsCard) resultsCard.scrollIntoView({ behavior: 'smooth' });
     }
 
     function updatePrintTemplate(data) {
         const patientData = JSON.parse(sessionStorage.getItem('patientData') || '{}');
-        
+
         // Patient information
         if (document.getElementById('printPatientName')) {
             document.getElementById('printPatientName').textContent = patientData.name || '--';
             document.getElementById('printPatientAge').textContent = patientData.age || '--';
             document.getElementById('printPatientGender').textContent = patientData.gender || '--';
             document.getElementById('printDate').textContent = new Date().toLocaleDateString();
-            
+
             // Test results
             document.getElementById('printRiskLabel').textContent = data.label;
             const printRiskLabel = document.getElementById('printRiskLabel').parentElement;
@@ -142,13 +156,13 @@ document.addEventListener('DOMContentLoaded', function() {
                 printRiskLabel.style.backgroundColor = '#d4edda';
                 printRiskLabel.style.borderLeftColor = '#28a745';
             }
-            
+
             // Metrics
             document.getElementById('printBlinkCount').textContent = data.blink_count;
             document.getElementById('printBlinkRate').textContent = data.blink_rate_bpm + ' BPM';
             document.getElementById('printMeanIbi').textContent = data.mean_ibi_sec + ' s';
             document.getElementById('printMaxEyeOpen').textContent = data.max_eye_open_sec + ' s';
-            
+
             // Generated date
             document.getElementById('printGeneratedDate').textContent = new Date().toLocaleString();
         }
@@ -157,18 +171,22 @@ document.addEventListener('DOMContentLoaded', function() {
     // Print functionality
     if (printBtn) {
         printBtn.addEventListener('click', function() {
-            const printContent = document.getElementById('printTemplate').innerHTML;
+            const template = document.getElementById('printTemplate');
+            const printContent = template ? template.innerHTML : '';
             const printWindow = window.open('', '', 'height=600,width=800');
-            
+
+            if (!printWindow) {
+                alert('Popup blocked. Please allow popups to print.');
+                return;
+            }
+
             printWindow.document.write(`
                 <!DOCTYPE html>
                 <html>
                 <head>
                     <title>Dry Eye Analysis Report - NAYAN-AI</title>
                     <style>
-                        @media print {
-                            body { margin: 0; padding: 20px; }
-                        }
+                        @media print { body { margin: 0; padding: 20px; } }
                         body { font-family: Arial, sans-serif; }
                         .header { text-align: center; margin-bottom: 30px; }
                         .header h1 { color: #0066cc; margin: 0; }
@@ -189,74 +207,28 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Download functionality
+    // Download functionality (JSON report)
     if (downloadBtn) {
         downloadBtn.addEventListener('click', function() {
             const patientData = JSON.parse(sessionStorage.getItem('patientData') || '{}');
             const dryeyeResults = JSON.parse(sessionStorage.getItem('dryEyeResults') || '{}');
-            
+
             const reportData = {
                 patient: patientData,
                 test_type: 'Dry Eye Detection',
                 results: dryeyeResults,
                 date: new Date().toISOString()
             };
-            
+
             const dataStr = JSON.stringify(reportData, null, 2);
-            const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-            
+            const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
+
             const exportFileDefaultName = `dry_eye_report_${Date.now()}.json`;
-            
+
             const linkElement = document.createElement('a');
             linkElement.setAttribute('href', dataUri);
             linkElement.setAttribute('download', exportFileDefaultName);
             linkElement.click();
-        });
-    }
-});
-                    </style>
-                </head>
-                <body>
-                    ${printContent}
-                    <script>
-                        window.print();
-                        window.close();
-                    </script>
-                </body>
-                </html>
-            `);
-            printWindow.document.close();
-        });
-    }
-
-    // Download as PDF (simple version - creates downloadable HTML)
-    if (downloadBtn) {
-        downloadBtn.addEventListener('click', function() {
-            const printContent = document.getElementById('printTemplate').innerHTML;
-            const htmlContent = `
-                <!DOCTYPE html>
-                <html>
-                <head>
-                    <title>Dry Eye Analysis Report - NAYAN-AI</title>
-                    <style>
-                        body { font-family: Arial, sans-serif; margin: 20px; }
-                    </style>
-                </head>
-                <body>
-                    ${printContent}
-                </body>
-                </html>
-            `;
-            
-            const blob = new Blob([htmlContent], { type: 'text/html' });
-            const url = window.URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = `NAYAN-AI_DryEye_Report_${new Date().getTime()}.html`;
-            document.body.appendChild(a);
-            a.click();
-            window.URL.revokeObjectURL(url);
-            document.body.removeChild(a);
         });
     }
 });

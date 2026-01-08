@@ -2,7 +2,15 @@
 REM Start NAYAN-AI Backend Server
 REM This script starts the Flask server on port 5000
 
-cd /d "%~dp0backend"
+set "ROOT=%~dp0"
+
+if exist "%ROOT%.venv\Scripts\python.exe" (
+	set "PY=%ROOT%.venv\Scripts\python.exe"
+) else (
+	set "PY=python"
+)
+
+cd /d "%ROOT%backend"
 
 echo.
 echo ╔════════════════════════════════════════╗
@@ -10,6 +18,6 @@ echo ║    NAYAN-AI BACKEND - STARTING...      ║
 echo ╚════════════════════════════════════════╝
 echo.
 
-python app.py
+"%PY%" app.py
 
 pause

@@ -14,28 +14,118 @@ import csv
 import sys
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, request, jsonify, send_from_directory, render_template_string
+from flask import Flask, request, jsonify, send_from_directory, render_template_string, redirect, send_file, abort
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from werkzeug.utils import secure_filename
+from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
 from threading import Lock
 
 # ============== APP SETUP ==============
+BASE_DIR = Path(__file__).resolve().parent
+PROJECT_DIR = BASE_DIR.parent
+FRONTEND_DIR = PROJECT_DIR / 'frontend'
+
 app = Flask(__name__)
 app.config['SECRET_KEY'] = 'nayan-ai-secret-key-2024'
 app.config['MAX_CONTENT_LENGTH'] = 500 * 1024 * 1024  # 500MB max
-app.config['UPLOAD_FOLDER'] = 'uploads'
+app.config['UPLOAD_FOLDER'] = str(PROJECT_DIR / 'uploads')
 
 CORS(app)
-socketio = SocketIO(app, cors_allowed_origins="*")
+socketio = SocketIO(
+    app,
+    cors_allowed_origins="*",
+    async_mode=os.environ.get('SOCKETIO_ASYNC_MODE', 'threading')
+)
+
+
+# ============== FRONTEND SERVING (OPTIONAL) ==============
+def _frontend_file(filename: str):
+    if not FRONTEND_DIR.exists():
+        return jsonify({
+            'success': False,
+            'message': 'Frontend directory not found',
+            'expected_path': str(FRONTEND_DIR)
+        }), 404
+    return send_from_directory(str(FRONTEND_DIR), filename)
+
+
+@app.route('/', methods=['GET'])
+def serve_root():
+    return _frontend_file('login.html')
+
+
+@app.route('/login', methods=['GET'])
+@app.route('/login.html', methods=['GET'])
+def serve_login():
+    return _frontend_file('login.html')
+
+
+@app.route('/signin', methods=['GET'])
+@app.route('/signin.html', methods=['GET'])
+def serve_signin():
+    return _frontend_file('signin.html')
+
+
+@app.route('/index', methods=['GET'])
+@app.route('/index.html', methods=['GET'])
+def serve_index():
+    return _frontend_file('index.html')
+
+
+@app.route('/patient', methods=['GET'])
+@app.route('/patient_input', methods=['GET'])
+@app.route('/patient_input.html', methods=['GET'])
+def serve_patient_input():
+    return _frontend_file('patient_input.html')
+
+
+@app.route('/cataract', methods=['GET'])
+@app.route('/cataract.html', methods=['GET'])
+def serve_cataract_page():
+    return _frontend_file('cataract.html')
+
+
+@app.route('/dryeye', methods=['GET'])
+@app.route('/dryeye.html', methods=['GET'])
+def serve_dryeye_page():
+    return _frontend_file('dryeye.html')
+
+
+@app.route('/glaucoma', methods=['GET'])
+@app.route('/glaucoma.html', methods=['GET'])
+def serve_glaucoma_page():
+    # Glaucoma UI is hardware-only; keep API endpoint but hide UI from the integrated site.
+    return redirect('/index', code=302)
+
+
+@app.route('/history', methods=['GET'])
+@app.route('/history.html', methods=['GET'])
+def serve_history_page():
+    return _frontend_file('history.html')
+
+
+@app.route('/assets/<path:filename>', methods=['GET'])
+def serve_assets(filename):
+    assets_dir = FRONTEND_DIR / 'assets'
+    return send_from_directory(str(assets_dir), filename)
+
+
+@app.route('/favicon.ico', methods=['GET'])
+def serve_favicon():
+    """Avoid noisy 404s from browsers requesting /favicon.ico."""
+    icon = FRONTEND_DIR / 'assets' / 'favicon.ico'
+    if icon.exists():
+        return send_from_directory(str(icon.parent), icon.name)
+    return ('', 204)
 
 # Create upload folders
-os.makedirs('uploads/cataract', exist_ok=True)
-os.makedirs('uploads/dryeye', exist_ok=True)
-os.makedirs('uploads/glaucoma', exist_ok=True)
-os.makedirs('uploads/camera', exist_ok=True)
-os.makedirs('debug', exist_ok=True)
+os.makedirs(PROJECT_DIR / 'uploads' / 'cataract', exist_ok=True)
+os.makedirs(PROJECT_DIR / 'uploads' / 'dryeye', exist_ok=True)
+os.makedirs(PROJECT_DIR / 'uploads' / 'glaucoma', exist_ok=True)
+os.makedirs(PROJECT_DIR / 'uploads' / 'camera', exist_ok=True)
+os.makedirs(PROJECT_DIR / 'debug', exist_ok=True)
 
 # Database
 DB_PATH = 'nayan_ai.db'
@@ -131,16 +221,41 @@ def login():
     with db_lock:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
-        c.execute('SELECT id, name FROM users WHERE email = ? AND password = ?', (email, password))
+        c.execute('SELECT id, name, password FROM users WHERE email = ?', (email,))
         user = c.fetchone()
+
+        if not user:
+            conn.close()
+            return jsonify({'success': False, 'message': 'Invalid credentials'}), 401
+
+        user_id, name, stored_password = user
+
+        # Backward-compatible password check:
+        # - Current Werkzeug may store hashes as `scrypt:` (default) or `pbkdf2:`
+        # - Legacy users may have plaintext passwords in the DB
+        ok = False
+        if stored_password:
+            try:
+                ok = check_password_hash(stored_password, password)
+            except Exception:
+                ok = (stored_password == password)
+
+        # Opportunistic upgrade of legacy plaintext passwords.
+        if ok and stored_password == password:
+            try:
+                c.execute('UPDATE users SET password = ? WHERE id = ?', (generate_password_hash(password), user_id))
+                conn.commit()
+            except Exception:
+                pass
+
         conn.close()
-    
-    if user:
+
+    if ok:
         return jsonify({
             'success': True,
             'message': 'Login successful',
-            'user_id': user[0],
-            'name': user[1],
+            'user_id': user_id,
+            'name': name,
             'email': email
         }), 200
     else:
@@ -161,8 +276,8 @@ def register():
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
         try:
-            c.execute('INSERT INTO users (email, password, name) VALUES (?, ?, ?)', 
-                     (email, password, name))
+            c.execute('INSERT INTO users (email, password, name) VALUES (?, ?, ?)',
+                     (email, generate_password_hash(password), name))
             conn.commit()
             user_id = c.lastrowid
             conn.close()
@@ -297,11 +412,12 @@ def upload_cataract():
         if not file.filename.lower().endswith(('.jpg', '.jpeg', '.png', '.webp')):
             return jsonify({'success': False, 'message': f'Invalid file type: {file.filename}. Allowed: JPG, PNG, WEBP'}), 400
         
-        # Create upload directory if not exists
-        os.makedirs('uploads/cataract', exist_ok=True)
-        
+        # Create upload directory if not exists (absolute path)
+        cataract_dir = PROJECT_DIR / 'uploads' / 'cataract'
+        os.makedirs(cataract_dir, exist_ok=True)
+
         filename = secure_filename(f"cataract_{int(time.time())}.jpg")
-        filepath = os.path.join('uploads/cataract', filename)
+        filepath = str(cataract_dir / filename)
         
         print(f"[CATARACT] Saving file to: {filepath}")
         file.save(filepath)
@@ -565,12 +681,56 @@ def handle_stop_stream():
 @app.route('/uploads/<folder>/<filename>')
 def serve_upload(folder, filename):
     """Serve uploaded files"""
-    return send_from_directory(os.path.join('uploads', folder), filename)
+    candidates = [
+        PROJECT_DIR / 'uploads' / folder / filename,
+        BASE_DIR / 'uploads' / folder / filename,  # legacy: server started inside backend/
+        Path('uploads') / folder / filename,       # legacy: server relies on CWD
+    ]
+    for file_path in candidates:
+        try:
+            if file_path.exists() and file_path.is_file():
+                return send_file(str(file_path))
+        except Exception:
+            continue
+    abort(404)
+
+
+@app.route('/api/debug/upload-path', methods=['GET'])
+def debug_upload_path():
+    """Debug helper for upload path resolution (safe, read-only)."""
+    folder = request.args.get('folder', 'cataract')
+    filename = request.args.get('filename', '')
+
+    candidates = [
+        PROJECT_DIR / 'uploads' / folder / filename,
+        BASE_DIR / 'uploads' / folder / filename,
+        Path('uploads') / folder / filename,
+    ]
+
+    return jsonify({
+        'success': True,
+        'cwd': os.getcwd(),
+        'BASE_DIR': str(BASE_DIR),
+        'PROJECT_DIR': str(PROJECT_DIR),
+        'folder': folder,
+        'filename': filename,
+        'candidates': [
+            {
+                'path': str(p),
+                'exists': bool(p.exists()) if filename else None,
+                'is_file': bool(p.is_file()) if filename else None,
+            }
+            for p in candidates
+        ]
+    }), 200
 
 @app.route('/debug/<filename>')
 def serve_debug(filename):
     """Serve debug files"""
-    return send_from_directory('debug', filename)
+    file_path = PROJECT_DIR / 'debug' / filename
+    if not file_path.exists() or not file_path.is_file():
+        abort(404)
+    return send_file(str(file_path))
 
 # ============== HEALTH CHECK ==============
 @app.route('/api/health', methods=['GET'])
@@ -581,6 +741,32 @@ def health_check():
         'service': 'NAYAN-AI Backend',
         'timestamp': datetime.now().isoformat()
     }), 200
+
+
+# ============== COMPATIBILITY ROUTES (LEGACY DOCS/DEMOS) ==============
+@app.route('/health', methods=['GET'])
+def health_check_legacy():
+    return health_check()
+
+
+@app.route('/cataract/upload', methods=['POST'])
+def upload_cataract_legacy():
+    return upload_cataract()
+
+
+@app.route('/dryeye/upload', methods=['POST'])
+def upload_dryeye_legacy():
+    return upload_dryeye()
+
+
+@app.route('/glaucoma/measure', methods=['POST'])
+def glaucoma_measure_legacy():
+    return glaucoma_measure()
+
+
+@app.route('/results/<result_type>/<int:patient_id>', methods=['GET'])
+def get_results_legacy(result_type, patient_id):
+    return get_results(result_type, patient_id)
 
 # ============== RUN SERVER ==============
 if __name__ == '__main__':
@@ -597,8 +783,11 @@ if __name__ == '__main__':
     print("=" * 50)
     sys.stdout.flush()
     
+    host = os.environ.get('NAYAN_HOST', '0.0.0.0')
+    port = int(os.environ.get('NAYAN_PORT', '5000'))
+
     try:
-        socketio.run(app, host='127.0.0.1', port=5000, debug=False, allow_unsafe_werkzeug=True)
+        socketio.run(app, host=host, port=port, debug=False, allow_unsafe_werkzeug=True)
     except Exception as e:
         print(f"ERROR: Failed to start server: {e}")
         import traceback

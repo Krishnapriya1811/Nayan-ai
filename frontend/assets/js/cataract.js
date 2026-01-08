@@ -1,7 +1,9 @@
 // Cataract Detection Page JavaScript
 // Complete integration with backend API
 
-const API_BASE = 'http://localhost:5000/api';
+// Use same-origin API when served by the backend.
+// NOTE: use `var` so it can be safely re-declared across multiple script files.
+var API_BASE = `${window.location.origin}/api`;
 
 document.addEventListener('DOMContentLoaded', function() {
     // Get patient data from session
@@ -27,12 +29,19 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // Image input change handler
     imageInput.addEventListener('change', function(e) {
-        const file = e.target.files[0];
+        // Reset UI state for a new selection
+        if (errorAlert) errorAlert.style.display = 'none';
+        uploadBtn.disabled = true;
+
+        const file = e.target.files && e.target.files[0];
         if (!file) return;
 
-        // Validate file type
-        if (!file.type.startsWith('image/')) {
+        // Validate file type.
+        // Some mobile browsers provide an empty MIME type for captured photos,
+        // so only enforce the check when a type is present.
+        if (file.type && !file.type.startsWith('image/')) {
             showError('Please select a valid image file');
+            imageInput.value = '';
             return;
         }
 
@@ -40,8 +49,13 @@ document.addEventListener('DOMContentLoaded', function() {
         const maxSize = 10 * 1024 * 1024;
         if (file.size > maxSize) {
             showError('File size exceeds 10MB limit');
+            imageInput.value = '';
             return;
         }
+
+        // Enable upload immediately after validation.
+        // Some mobile browsers fail to fire FileReader onload reliably.
+        uploadBtn.disabled = false;
 
         // Show preview
         const reader = new FileReader();
@@ -49,7 +63,11 @@ document.addEventListener('DOMContentLoaded', function() {
             imagePreview.src = event.target.result;
             fileInfo.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
             previewContainer.style.display = 'block';
-            uploadBtn.disabled = false;
+        };
+        reader.onerror = function() {
+            // Preview is optional; keep upload enabled.
+            fileInfo.textContent = `${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`;
+            previewContainer.style.display = 'block';
         };
         reader.readAsDataURL(file);
     });

@@ -27,9 +27,6 @@
                         <a class="nav-link active" href="index.html"><i class="bi bi-house-door me-1"></i>Home</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="glaucoma.html"><i class="bi bi-activity me-1"></i>Glaucoma</a>
-                    </li>
-                    <li class="nav-item">
                         <a class="nav-link" href="cataract.html"><i class="bi bi-camera me-1"></i>Cataract</a>
                     </li>
                     <li class="nav-item">
@@ -55,7 +52,7 @@
                         <i class="bi bi-eye-fill me-2"></i>NAYAN-AI
                     </h1>
                     <p class="lead mb-4">
-                        AI-Powered Eye Screening System for Early Detection of Cataract, Dry Eye, and Glaucoma Risk
+                        AI-Powered Eye Screening System for Early Detection of Cataract and Dry Eye Risk
                     </p>
                     <p class="mb-4">
                         A comprehensive web-based platform utilizing deep learning and IoT hardware for accessible eye health screening.
@@ -280,32 +277,8 @@
                 <p class="text-muted">Understanding the conditions we screen for</p>
             </div>
             <div class="row g-4">
-                <!-- Glaucoma Info -->
-                <div class="col-lg-4">
-                    <div class="card disorder-card h-100 border-0 shadow-sm">
-                        <div class="card-header bg-danger text-white">
-                            <h5 class="mb-0"><i class="bi bi-activity me-2"></i>Glaucoma</h5>
-                        </div>
-                        <div class="card-body">
-                            <p class="card-text">
-                                Glaucoma is a group of eye conditions that damage the optic nerve, often caused by abnormally high intraocular pressure (IOP). It's one of the leading causes of irreversible blindness worldwide.
-                            </p>
-                            <h6 class="fw-bold text-danger">Key Facts:</h6>
-                            <ul class="small">
-                                <li>Often called the "silent thief of sight"</li>
-                                <li>Usually no early symptoms</li>
-                                <li>Regular IOP monitoring is crucial</li>
-                                <li>Early detection can prevent vision loss</li>
-                            </ul>
-                            <div class="alert alert-light small mb-0">
-                                <i class="bi bi-lightbulb me-1"></i>
-                                <strong>Our Approach:</strong> We use ultrasonic + force proxy measurements via ESP32 hardware to estimate IOP risk.
-                            </div>
-                        </div>
-                    </div>
-                </div>
                 <!-- Cataract Info -->
-                <div class="col-lg-4">
+                <div class="col-lg-6">
                     <div class="card disorder-card h-100 border-0 shadow-sm">
                         <div class="card-header bg-warning text-dark">
                             <h5 class="mb-0"><i class="bi bi-camera me-2"></i>Cataract</h5>
@@ -329,7 +302,7 @@
                     </div>
                 </div>
                 <!-- Dry Eye Info -->
-                <div class="col-lg-4">
+                <div class="col-lg-6">
                     <div class="card disorder-card h-100 border-0 shadow-sm">
                         <div class="card-header bg-info text-white">
                             <h5 class="mb-0"><i class="bi bi-droplet me-2"></i>Dry Eye</h5>
@@ -364,33 +337,8 @@
                 <p class="text-muted">Choose a screening test to begin</p>
             </div>
             <div class="row g-4">
-                <!-- Glaucoma Module -->
-                <div class="col-md-4">
-                    <div class="card module-card h-100 border-0 shadow hover-lift">
-                        <div class="card-body text-center p-4">
-                            <div class="module-icon bg-danger text-white mb-3">
-                                <i class="bi bi-activity"></i>
-                            </div>
-                            <h4 class="card-title fw-bold">Glaucoma Screening</h4>
-                            <p class="card-text text-muted">
-                                Real-time IOP proxy measurement using ESP32 hardware with ultrasonic sensors.
-                            </p>
-                            <ul class="list-unstyled small text-start mb-4">
-                                <li><i class="bi bi-check-circle-fill text-success me-2"></i>Live hardware readings</li>
-                                <li><i class="bi bi-check-circle-fill text-success me-2"></i>Instant risk assessment</li>
-                                <li><i class="bi bi-check-circle-fill text-success me-2"></i>Auto-refresh data</li>
-                            </ul>
-                            <a href="glaucoma.html" class="btn btn-danger btn-lg w-100">
-                                <i class="bi bi-play-fill me-1"></i>Start Test
-                            </a>
-                        </div>
-                        <div class="card-footer bg-danger text-white text-center small">
-                            <i class="bi bi-lightning-fill me-1"></i>Step 1 of 3
-                        </div>
-                    </div>
-                </div>
                 <!-- Cataract Module -->
-                <div class="col-md-4">
+                <div class="col-md-6">
                     <div class="card module-card h-100 border-0 shadow hover-lift">
                         <div class="card-body text-center p-4">
                             <div class="module-icon bg-warning text-dark mb-3">
@@ -410,12 +358,12 @@
                             </a>
                         </div>
                         <div class="card-footer bg-warning text-dark text-center small">
-                            <i class="bi bi-lightning-fill me-1"></i>Step 2 of 3
+                            <i class="bi bi-lightning-fill me-1"></i>Step 1 of 2
                         </div>
                     </div>
                 </div>
                 <!-- Dry Eye Module -->
-                <div class="col-md-4">
+                <div class="col-md-6">
                     <div class="card module-card h-100 border-0 shadow hover-lift">
                         <div class="card-body text-center p-4">
                             <div class="module-icon bg-info text-white mb-3">
@@ -435,7 +383,7 @@
                             </a>
                         </div>
                         <div class="card-footer bg-info text-white text-center small">
-                            <i class="bi bi-lightning-fill me-1"></i>Step 3 of 3
+                            <i class="bi bi-lightning-fill me-1"></i>Step 2 of 2
                         </div>
                     </div>
                 </div>

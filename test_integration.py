@@ -171,7 +171,7 @@ print(f"""
 ║            🎉 ALL SYSTEMS GO! 🎉                             ║
 ║                                                               ║
 ║ NEXT STEPS:                                                   ║
-║ 1. Open http://localhost/frontend/login.html in browser       ║
+║ 1. Open http://localhost:5000/login in browser                ║
 ║ 2. Click "Demo Login" or register with email                  ║
 ║ 3. Fill in patient information                                ║
 ║ 4. Upload images/videos for screening                         ║
