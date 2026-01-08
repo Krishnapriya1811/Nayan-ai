@@ -40,6 +40,83 @@ socketio = SocketIO(
 )
 
 
+# ============== CATARACT (DL MODEL) ==============
+# Lazily loaded so the server can still start even if TensorFlow isn't installed.
+_CATARACT_MODEL = None
+_CATARACT_CLASS_NAMES = None
+_cataract_model_lock = Lock()
+
+
+def _load_cataract_dl_model():
+    """Load cataract DL model + labels once (thread-safe)."""
+    global _CATARACT_MODEL, _CATARACT_CLASS_NAMES
+
+    if _CATARACT_MODEL is not None and _CATARACT_CLASS_NAMES is not None:
+        return
+
+    with _cataract_model_lock:
+        if _CATARACT_MODEL is not None and _CATARACT_CLASS_NAMES is not None:
+            return
+
+        # If you faced Windows Keras 3 overflow issues, keep this ON.
+        # Must be set before importing TensorFlow in some environments.
+        os.environ.setdefault("TF_USE_LEGACY_KERAS", "1")
+
+        try:
+            import tensorflow as tf  # type: ignore
+        except Exception as e:
+            raise RuntimeError(
+                "TensorFlow is not installed (required for DL cataract). "
+                "Install backend requirements and try again. "
+                f"Original error: {e}"
+            )
+
+        artifacts_dir = BASE_DIR / 'catract' / 'artifacts'
+        model_path = artifacts_dir / 'cataract_mobilenetv2.keras'
+        labels_path = artifacts_dir / 'labels.json'
+
+        if not model_path.exists():
+            raise FileNotFoundError(f"DL model not found at: {model_path}")
+        if not labels_path.exists():
+            raise FileNotFoundError(f"labels.json not found at: {labels_path}")
+
+        _CATARACT_MODEL = tf.keras.models.load_model(str(model_path))
+        _CATARACT_CLASS_NAMES = json.loads(labels_path.read_text(encoding='utf-8')).get('class_names')
+        if not _CATARACT_CLASS_NAMES:
+            raise ValueError("labels.json missing 'class_names'")
+
+
+def _preprocess_for_cataract_mobilenet(frame_bgr: np.ndarray) -> np.ndarray:
+    """Match preprocessing from backend/catract/mobile_cataract_server_dl.py.
+
+    IMPORTANT: model already applies preprocess_input internally.
+    Feed raw RGB in [0, 255] as float32.
+    """
+    rgb = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2RGB)
+    rgb = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_AREA)
+    x = rgb.astype(np.float32)
+    return np.expand_dims(x, axis=0)
+
+
+def predict_cataract_dl(image_path: str):
+    """Return (pred_label, conf_percent, probs_map)."""
+    _load_cataract_dl_model()
+
+    frame = cv2.imread(image_path)
+    if frame is None:
+        raise ValueError("Failed to read image")
+
+    x = _preprocess_for_cataract_mobilenet(frame)
+    probs = _CATARACT_MODEL.predict(x, verbose=0)[0]
+
+    idx = int(np.argmax(probs))
+    pred_label = str(_CATARACT_CLASS_NAMES[idx])
+    conf_percent = float(probs[idx]) * 100.0
+
+    probs_map = {str(_CATARACT_CLASS_NAMES[i]): float(probs[i]) for i in range(len(_CATARACT_CLASS_NAMES))}
+    return pred_label, conf_percent, probs_map
+
+
 # ============== FRONTEND SERVING (OPTIONAL) ==============
 def _frontend_file(filename: str):
     if not FRONTEND_DIR.exists():
@@ -428,13 +505,24 @@ def upload_cataract():
         
         print(f"[CATARACT] File saved successfully, size: {os.path.getsize(filepath)} bytes")
         
-        # Extract features
-        print(f"[CATARACT] Extracting features from {filepath}")
+        # Compute basic image metrics for the UI (contrast/sharpness) but use DL for classification.
+        print(f"[CATARACT] Computing image metrics from {filepath}")
         features = extract_cataract_features(filepath)
         if not features:
             return jsonify({'success': False, 'message': 'Failed to process image. Image may be corrupted or unreadable.'}), 400
-        
-        print(f"[CATARACT] Features extracted: {features}")
+
+        print(f"[CATARACT] Metrics computed: {features}")
+
+        # DL prediction
+        print(f"[CATARACT] Running DL model on {filepath}")
+        pred_label, conf_percent, probs_map = predict_cataract_dl(filepath)
+
+        # Map model class name to UI label
+        is_risk = pred_label.strip().lower() == 'cataract'
+        features['label'] = 'Possible Cataract Risk' if is_risk else 'Normal'
+        features['confidence'] = conf_percent
+        features['dl_pred_label'] = pred_label
+        features['dl_probs'] = probs_map
         
         # Save to database
         with db_lock:

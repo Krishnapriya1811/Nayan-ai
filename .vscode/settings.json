@@ -1,0 +1,8 @@
+{
+  // Force VS Code Python extension to use your interpreter
+  "python.defaultInterpreterPath": "D:\\python\\intepretor\\Scripts\\python.exe",
+
+  // Optional but helpful: point analysis tools at the same interpreter
+"python.terminal.activateEnvironment": true,
+"python-envs.pythonProjects": []
+}
