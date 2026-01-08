@@ -173,14 +173,26 @@ def serve_dryeye_page():
 @app.route('/glaucoma', methods=['GET'])
 @app.route('/glaucoma.html', methods=['GET'])
 def serve_glaucoma_page():
-    # Glaucoma UI is hardware-only; keep API endpoint but hide UI from the integrated site.
-    return redirect('/index', code=302)
+    return _frontend_file('glaucoma.html')
 
 
 @app.route('/history', methods=['GET'])
 @app.route('/history.html', methods=['GET'])
 def serve_history_page():
     return _frontend_file('history.html')
+
+
+@app.route('/camp', methods=['GET'])
+@app.route('/camp_workflow', methods=['GET'])
+@app.route('/camp_workflow.html', methods=['GET'])
+def serve_camp_workflow():
+    return _frontend_file('camp_workflow.html')
+
+
+@app.route('/report', methods=['GET'])
+@app.route('/report.html', methods=['GET'])
+def serve_report_page():
+    return _frontend_file('report.html')
 
 
 @app.route('/assets/<path:filename>', methods=['GET'])
@@ -416,7 +428,9 @@ def get_patient(patient_id):
                 'age': patient[3],
                 'gender': patient[4],
                 'phone': patient[5],
-                'email': patient[6]
+                'email': patient[6],
+                'medical_history': patient[7],
+                'family_history': patient[8]
             }
         }), 200
     return jsonify({'success': False, 'message': 'Patient not found'}), 404
@@ -680,11 +694,18 @@ def get_results(result_type, patient_id):
     
     with db_lock:
         conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
         c = conn.cursor()
         c.execute(f'SELECT * FROM {table} WHERE patient_id = ? ORDER BY timestamp DESC', 
                  (patient_id,))
-        results = c.fetchall()
+        rows = c.fetchall()
         conn.close()
+    
+    # Convert rows to dictionaries
+    results = []
+    for row in rows:
+        result_dict = dict(row)
+        results.append(result_dict)
     
     return jsonify({
         'success': True,
