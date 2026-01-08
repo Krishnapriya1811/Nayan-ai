@@ -420,6 +420,10 @@ def save_patient():
     if not user_id:
         return jsonify({'success': False, 'message': 'User ID required'}), 400
     
+    # Handle both camelCase (from JS) and snake_case
+    medical_history = data.get('medical_history') or data.get('medicalHistory') or 'None reported'
+    family_history = data.get('family_history') or data.get('familyHistory') or 'None reported'
+    
     with db_lock:
         conn = sqlite3.connect(DB_PATH)
         c = conn.cursor()
@@ -427,15 +431,15 @@ def save_patient():
                      (user_id, name, age, gender, phone, email, medical_history, family_history)
                      VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
                  (user_id, data.get('name'), data.get('age'), data.get('gender'),
-                  data.get('phone'), data.get('email'), 
-                  data.get('medicalHistory'), data.get('familyHistory')))
+                  data.get('phone', ''), data.get('email', ''), 
+                  medical_history, family_history))
         conn.commit()
         patient_id = c.lastrowid
         conn.close()
     
     return jsonify({
         'success': True,
-        'message': 'Patient saved',
+        'message': 'Patient information saved successfully',
         'patient_id': patient_id
     }), 201
 
@@ -684,7 +688,13 @@ def glaucoma_measure():
     """Record glaucoma IOP measurement"""
     data = request.json
     patient_id = data.get('patient_id')
-    iop_proxy = data.get('iop_proxy', 15.0 + np.random.rand() * 10)
+    # Handle multiple naming conventions from frontend
+    iop_proxy = data.get('iop_proxy') or data.get('iop') or data.get('iopValue')
+    
+    if not iop_proxy:
+        iop_proxy = 15.0 + np.random.rand() * 10  # Fallback random value
+    else:
+        iop_proxy = float(iop_proxy)
     
     if not patient_id:
         return jsonify({'success': False, 'message': 'Patient ID required'}), 400

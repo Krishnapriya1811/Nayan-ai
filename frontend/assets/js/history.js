@@ -84,9 +84,9 @@ function renderCataractTable() {
 
     const query = (document.getElementById('cataractSearch')?.value || '').toLowerCase();
     const filtered = cataractResults.filter(row => {
-        // Schema: (id, patient_id, image_file, contrast, sharpness, edge_strength, label, confidence, timestamp)
-        const label = String(row[6] ?? '').toLowerCase();
-        const ts = String(row[8] ?? '').toLowerCase();
+        // Handle both object and array formats
+        const label = String(row.label || row[6] || '').toLowerCase();
+        const ts = String(row.timestamp || row[8] || '').toLowerCase();
         return !query || label.includes(query) || ts.includes(query);
     });
 
@@ -116,13 +116,13 @@ function renderCataractTable() {
     `;
 
     filtered.forEach(result => {
-        const timestamp = result[8] ? new Date(result[8]).toLocaleString() : '--';
-        const contrast = Number(result[3]);
-        const sharpness = Number(result[4]);
-        const label = String(result[6] ?? '');
-        const confidence = Number(result[7]);
-        const imageFile = result[2];
-        const resultClass = label.includes('Risk') ? 'bg-warning text-dark' : 'bg-success';
+        const timestamp = (result.timestamp || result[8]) ? new Date(result.timestamp || result[8]).toLocaleString() : '--';
+        const contrast = Number(result.contrast || result[3] || 0);
+        const sharpness = Number(result.sharpness || result[4] || 0);
+        const label = String(result.label || result[6] || '');
+        const confidence = Number(result.confidence || result[7] || 0);
+        const imageFile = result.image_file || result[2];
+        const resultClass = label.toLowerCase().includes('risk') ? 'bg-warning text-dark' : 'bg-success';
 
         html += `
             <tr>
@@ -179,9 +179,9 @@ function renderDryeyeTable() {
 
     const query = (document.getElementById('dryeyeSearch')?.value || '').toLowerCase();
     const filtered = dryeyeResults.filter(row => {
-        // Schema: (id, patient_id, video_file, duration_sec, blink_count, blink_rate_bpm, mean_ibi_sec, max_ibi_sec, max_eye_open_sec, label, timestamp)
-        const label = String(row[9] ?? '').toLowerCase();
-        const ts = String(row[10] ?? '').toLowerCase();
+        // Handle both object and array formats
+        const label = String(row.label || row[9] || '').toLowerCase();
+        const ts = String(row.timestamp || row[10] || '').toLowerCase();
         return !query || label.includes(query) || ts.includes(query);
     });
 
@@ -212,14 +212,14 @@ function renderDryeyeTable() {
     `;
 
     filtered.forEach(result => {
-        const timestamp = result[10] ? new Date(result[10]).toLocaleString() : '--';
-        const blinkCount = Number(result[4]);
-        const blinkRate = Number(result[5]);
-        const meanIbi = Number(result[6]);
-        const maxEyeOpen = Number(result[8]);
-        const label = String(result[9] ?? '');
-        const videoFile = result[2];
-        const resultClass = label.includes('Risk') ? 'bg-warning text-dark' : 'bg-success';
+        const timestamp = (result.timestamp || result[10]) ? new Date(result.timestamp || result[10]).toLocaleString() : '--';
+        const blinkCount = Number(result.blinks || result[4] || 0);
+        const blinkRate = Number(result.blink_rate || result[5] || 0);
+        const meanIbi = Number(result.mean_ibi || result[6] || 0);
+        const maxEyeOpen = Number(result.max_eye_open_time || result[8] || 0);
+        const label = String(result.label || result[9] || '');
+        const videoFile = result.video_file || result[2];
+        const resultClass = label.toLowerCase().includes('risk') ? 'bg-warning text-dark' : 'bg-success';
 
         html += `
             <tr>
@@ -277,9 +277,9 @@ function renderGlaucomaTable() {
 
     const query = (document.getElementById('glaucomaSearch')?.value || '').toLowerCase();
     const filtered = glaucomaResults.filter(row => {
-        // Schema: (id, patient_id, iop_proxy, risk_level, timestamp)
-        const riskLevel = String(row[3] ?? '').toLowerCase();
-        const ts = String(row[4] ?? '').toLowerCase();
+        // Handle both object and array formats
+        const riskLevel = String(row.risk_level || row[3] || '').toLowerCase();
+        const ts = String(row.timestamp || row[4] || '').toLowerCase();
         return !query || riskLevel.includes(query) || ts.includes(query);
     });
 
@@ -307,13 +307,13 @@ function renderGlaucomaTable() {
     `;
 
     filtered.forEach(result => {
-        const timestamp = result[4] ? new Date(result[4]).toLocaleString() : '--';
-        const iop = Number(result[2]);
-        const riskLevel = String(result[3] ?? '');
+        const timestamp = (result.timestamp || result[4]) ? new Date(result.timestamp || result[4]).toLocaleString() : '--';
+        const iop = Number(result.iop_proxy || result[2] || 0);
+        const riskLevel = String(result.risk_level || result[3] || '');
         let resultClass = 'bg-success';
-        if (riskLevel.includes('High')) {
+        if (riskLevel.toLowerCase().includes('high')) {
             resultClass = 'bg-danger';
-        } else if (riskLevel.includes('Low')) {
+        } else if (riskLevel.toLowerCase().includes('low')) {
             resultClass = 'bg-info';
         }
 
