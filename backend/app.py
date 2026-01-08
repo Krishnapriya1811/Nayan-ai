@@ -767,6 +767,709 @@ def get_results(result_type, patient_id):
         'count': len(results)
     }), 200
 
+# ============== PDF REPORT GENERATION ==============
+@app.route('/api/report/pdf/<int:patient_id>', methods=['GET'])
+def generate_pdf_report(patient_id):
+    """Generate comprehensive PDF report for patient including all screening results"""
+    try:
+        from reportlab.lib.pagesizes import letter, A4
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, Image as RLImage, PageBreak
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT, TA_RIGHT
+        from io import BytesIO
+        
+        # Get patient info
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            
+            # Fetch patient data
+            c.execute('SELECT * FROM patients WHERE id = ?', (patient_id,))
+            patient = c.fetchone()
+            
+            if not patient:
+                conn.close()
+                return jsonify({'success': False, 'message': 'Patient not found'}), 404
+            
+            # Fetch all results
+            c.execute('SELECT * FROM cataract_results WHERE patient_id = ? ORDER BY timestamp DESC', (patient_id,))
+            cataract_results = c.fetchall()
+            
+            c.execute('SELECT * FROM dryeye_results WHERE patient_id = ? ORDER BY timestamp DESC', (patient_id,))
+            dryeye_results = c.fetchall()
+            
+            c.execute('SELECT * FROM glaucoma_results WHERE patient_id = ? ORDER BY timestamp DESC', (patient_id,))
+            glaucoma_results = c.fetchall()
+            
+            conn.close()
+        
+        # Create PDF in memory
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle(
+            'CustomTitle',
+            parent=styles['Heading1'],
+            fontSize=24,
+            textColor=colors.HexColor('#0066cc'),
+            spaceAfter=12,
+            alignment=TA_CENTER
+        )
+        
+        heading_style = ParagraphStyle(
+            'CustomHeading',
+            parent=styles['Heading2'],
+            fontSize=14,
+            textColor=colors.HexColor('#0066cc'),
+            spaceAfter=10,
+            spaceBefore=12
+        )
+        
+        # Title
+        story.append(Paragraph("NAYAN-AI", title_style))
+        story.append(Paragraph("Comprehensive Eye Screening Report", styles['Heading2']))
+        story.append(Paragraph("AI-Assisted Eye Screening System", styles['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Patient Information
+        story.append(Paragraph("Patient Information", heading_style))
+        patient_data = [
+            ['Name:', patient['name'] or '--', 'Age:', f"{patient['age']} years" if patient['age'] else '--'],
+            ['Gender:', patient['gender'] or '--', 'Phone:', patient['phone'] or '--'],
+            ['Number:', patient['number'] or '--', 'Email:', patient['email'] or '--'],
+        ]
+        patient_table = Table(patient_data, colWidths=[1*inch, 2.5*inch, 1*inch, 2.5*inch])
+        patient_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
+            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f0f0f0')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ]))
+        story.append(patient_table)
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Report Details
+        report_data = [
+            ['Report Generated:', datetime.now().strftime('%Y-%m-%d %H:%M:%S')],
+            ['Patient ID:', str(patient['id'])],
+        ]
+        report_table = Table(report_data, colWidths=[2*inch, 5*inch])
+        report_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ]))
+        story.append(report_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Test Results - Cataract
+        story.append(Paragraph("Cataract Screening Results", heading_style))
+        if cataract_results:
+            cataract_data = [['Date', 'Contrast', 'Sharpness', 'Edge', 'Result', 'Confidence']]
+            for r in cataract_results:
+                cataract_data.append([
+                    r['timestamp'][:19] if r['timestamp'] else '--',
+                    f"{r['contrast']:.2f}" if r['contrast'] else '--',
+                    f"{r['sharpness']:.2f}" if r['sharpness'] else '--',
+                    f"{r['edge_strength']:.2f}" if r['edge_strength'] else '--',
+                    r['label'] or '--',
+                    f"{r['confidence']:.1f}%" if r['confidence'] else '--'
+                ])
+            cataract_table = Table(cataract_data, colWidths=[1.5*inch, 0.9*inch, 0.9*inch, 0.9*inch, 1.8*inch, 1*inch])
+            cataract_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#0066cc')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ]))
+            story.append(cataract_table)
+        else:
+            story.append(Paragraph("No cataract screening records found.", styles['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Test Results - Dry Eye
+        story.append(Paragraph("Dry Eye Screening Results", heading_style))
+        if dryeye_results:
+            dryeye_data = [['Date', 'Duration (s)', 'Blink Count', 'Blink Rate (BPM)', 'Mean IBI (s)', 'Max Eye Open (s)', 'Result']]
+            for r in dryeye_results:
+                dryeye_data.append([
+                    r['timestamp'][:19] if r['timestamp'] else '--',
+                    f"{r['duration_sec']:.1f}" if r['duration_sec'] else '--',
+                    str(r['blink_count']) if r['blink_count'] else '--',
+                    f"{r['blink_rate_bpm']:.1f}" if r['blink_rate_bpm'] else '--',
+                    f"{r['mean_ibi_sec']:.2f}" if r['mean_ibi_sec'] else '--',
+                    f"{r['max_eye_open_sec']:.2f}" if r['max_eye_open_sec'] else '--',
+                    r['label'] or '--'
+                ])
+            dryeye_table = Table(dryeye_data, colWidths=[1.3*inch, 0.8*inch, 0.9*inch, 1*inch, 0.9*inch, 1.1*inch, 1*inch])
+            dryeye_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#17a2b8')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 9),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.lightblue),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('FONTSIZE', (0, 1), (-1, -1), 8),
+            ]))
+            story.append(dryeye_table)
+        else:
+            story.append(Paragraph("No dry eye screening records found.", styles['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Test Results - Glaucoma
+        story.append(Paragraph("Glaucoma Screening Results", heading_style))
+        if glaucoma_results:
+            glaucoma_data = [['Date', 'IOP Proxy (mmHg)', 'Risk Level']]
+            for r in glaucoma_results:
+                glaucoma_data.append([
+                    r['timestamp'][:19] if r['timestamp'] else '--',
+                    f"{r['iop_proxy']:.1f}" if r['iop_proxy'] else '--',
+                    r['risk_level'] or '--'
+                ])
+            glaucoma_table = Table(glaucoma_data, colWidths=[2.5*inch, 2*inch, 2.5*inch])
+            glaucoma_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#28a745')),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 10),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.lightgreen),
+                ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+                ('FONTSIZE', (0, 1), (-1, -1), 9),
+            ]))
+            story.append(glaucoma_table)
+        else:
+            story.append(Paragraph("No glaucoma screening records found.", styles['Normal']))
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Interpretation Section
+        story.append(Paragraph("Interpretation", heading_style))
+        
+        # Determine overall risk
+        has_risk = False
+        risk_items = []
+        
+        if cataract_results:
+            latest_cataract = cataract_results[0]
+            if 'Risk' in (latest_cataract['label'] or ''):
+                has_risk = True
+                risk_items.append(f"• Cataract: {latest_cataract['label']} (Confidence: {latest_cataract['confidence']:.1f}%)")
+        
+        if dryeye_results:
+            latest_dryeye = dryeye_results[0]
+            if 'Risk' in (latest_dryeye['label'] or ''):
+                has_risk = True
+                risk_items.append(f"• Dry Eye: {latest_dryeye['label']}")
+        
+        if glaucoma_results:
+            latest_glaucoma = glaucoma_results[0]
+            if latest_glaucoma['risk_level'] and latest_glaucoma['risk_level'].lower() not in ['normal', 'low']:
+                has_risk = True
+                risk_items.append(f"• Glaucoma: {latest_glaucoma['risk_level']} Risk (IOP: {latest_glaucoma['iop_proxy']:.1f} mmHg)")
+        
+        if has_risk:
+            story.append(Paragraph("<b>Abnormal findings detected:</b>", styles['Normal']))
+            for item in risk_items:
+                story.append(Paragraph(item, styles['Normal']))
+            story.append(Spacer(1, 0.1*inch))
+            story.append(Paragraph("<b>Recommendation:</b> Immediate consultation with an ophthalmologist is recommended for comprehensive evaluation and proper diagnosis.", styles['Normal']))
+        else:
+            story.append(Paragraph("All screening results appear normal. Continue regular eye check-ups as recommended by your healthcare provider.", styles['Normal']))
+        
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Disclaimer
+        disclaimer_style = ParagraphStyle(
+            'Disclaimer',
+            parent=styles['Normal'],
+            fontSize=9,
+            textColor=colors.HexColor('#666666'),
+            spaceBefore=10,
+            spaceAfter=10
+        )
+        story.append(Paragraph("<b>Important Disclaimer:</b>", heading_style))
+        story.append(Paragraph(
+            "This is an AI-assisted screening tool for preliminary assessment only. This report is NOT a substitute "
+            "for professional medical diagnosis. Please consult a qualified ophthalmologist for complete eye examination "
+            "and proper diagnosis. The screening tool is designed to detect potential risk indicators but cannot provide "
+            "definitive diagnoses.",
+            disclaimer_style
+        ))
+        
+        # Footer
+        story.append(Spacer(1, 0.2*inch))
+        footer_style = ParagraphStyle(
+            'Footer',
+            parent=styles['Normal'],
+            fontSize=8,
+            textColor=colors.HexColor('#999999'),
+            alignment=TA_CENTER
+        )
+        story.append(Paragraph("This report is automatically generated by NAYAN-AI Eye Screening System", footer_style))
+        story.append(Paragraph(f"Report generated on: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}", footer_style))
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        
+        # Send file
+        filename = f"NAYAN-AI_Report_{patient['name']}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        return send_file(
+            buffer,
+            mimetype='application/pdf',
+            as_attachment=True,
+            download_name=filename
+        )
+    
+    except Exception as e:
+        import traceback
+        error_msg = f"{str(e)}\n{traceback.format_exc()}"
+        print(f"[PDF REPORT] Error: {error_msg}")
+        return jsonify({'success': False, 'message': f'Error generating PDF: {str(e)}'}), 500
+
+# ============== INDIVIDUAL SCREENING PDF REPORTS ==============
+@app.route('/api/report/cataract/pdf/<int:patient_id>', methods=['GET'])
+def generate_cataract_pdf(patient_id):
+    """Generate PDF report for cataract screening"""
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        from io import BytesIO
+        
+        # Get patient info and results
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            
+            c.execute('SELECT * FROM patients WHERE id = ?', (patient_id,))
+            patient = c.fetchone()
+            
+            if not patient:
+                conn.close()
+                return jsonify({'success': False, 'message': 'Patient not found'}), 404
+            
+            c.execute('SELECT * FROM cataract_results WHERE patient_id = ? ORDER BY timestamp DESC LIMIT 1', (patient_id,))
+            result = c.fetchone()
+            
+            conn.close()
+        
+        if not result:
+            return jsonify({'success': False, 'message': 'No cataract screening results found'}), 404
+        
+        # Create PDF
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#0066cc'), spaceAfter=12, alignment=TA_CENTER)
+        heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor('#0066cc'), spaceAfter=10, spaceBefore=12)
+        
+        # Header
+        story.append(Paragraph("NAYAN-AI", title_style))
+        story.append(Paragraph("Cataract Detection Report", styles['Heading2']))
+        story.append(Paragraph("AI-Assisted Eye Screening System", styles['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Patient Information
+        story.append(Paragraph("Patient Information", heading_style))
+        patient_data = [
+            ['Name:', patient['name'] or '--', 'Age:', f"{patient['age']} years" if patient['age'] else '--'],
+            ['Gender:', patient['gender'] or '--', 'Date:', result['timestamp'][:10] if result['timestamp'] else '--'],
+        ]
+        patient_table = Table(patient_data, colWidths=[1*inch, 2.5*inch, 1*inch, 2.5*inch])
+        patient_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
+            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f0f0f0')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ]))
+        story.append(patient_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Test Results
+        story.append(Paragraph("Test Results", heading_style))
+        risk_color = colors.HexColor('#fff3cd') if 'Risk' in (result['label'] or '') else colors.HexColor('#d4edda')
+        result_box = [['Risk Assessment:', result['label'] or '--']]
+        result_table = Table(result_box, colWidths=[2*inch, 5*inch])
+        result_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), risk_color),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 12),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('BOX', (0, 0), (-1, -1), 2, colors.HexColor('#0066cc')),
+        ]))
+        story.append(result_table)
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Detailed Metrics
+        story.append(Paragraph("Detailed Metrics", heading_style))
+        metrics_data = [
+            ['Metric', 'Value'],
+            ['Contrast', f"{result['contrast']:.2f}" if result['contrast'] else '--'],
+            ['Sharpness', f"{result['sharpness']:.2f}" if result['sharpness'] else '--'],
+            ['Edge Strength', f"{result['edge_strength']:.2f}" if result['edge_strength'] else '--'],
+            ['Confidence', f"{result['confidence']:.1f}%" if result['confidence'] else '--'],
+        ]
+        metrics_table = Table(metrics_data, colWidths=[3.5*inch, 3.5*inch])
+        metrics_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f9f9f9')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9f9f9')]),
+        ]))
+        story.append(metrics_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Interpretation
+        story.append(Paragraph("Interpretation", heading_style))
+        interp_text = "Cataract risk assessment based on image analysis using AI deep learning model (MobileNetV2). This is a screening support tool only and should not be used as a medical diagnosis. Please consult an ophthalmologist for professional evaluation."
+        story.append(Paragraph(interp_text, styles['Normal']))
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Footer
+        footer_style = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#999999'), alignment=TA_CENTER)
+        story.append(Paragraph("<strong>NAYAN-AI</strong> - AI-Assisted Eye Screening System", footer_style))
+        story.append(Paragraph("Developed by: Krishnapriya S, Madhumitha S, Mahalakshmi B S", footer_style))
+        story.append(Paragraph("Electronics and Communication Engineering Department", footer_style))
+        story.append(Paragraph(f"Generated on: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}", footer_style))
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        
+        filename = f"Cataract_Report_{patient['name']}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
+    
+    except Exception as e:
+        import traceback
+        print(f"[CATARACT PDF] Error: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'success': False, 'message': f'Error generating PDF: {str(e)}'}), 500
+
+@app.route('/api/report/dryeye/pdf/<int:patient_id>', methods=['GET'])
+def generate_dryeye_pdf(patient_id):
+    """Generate PDF report for dry eye screening"""
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        from io import BytesIO
+        
+        # Get patient info and results
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            
+            c.execute('SELECT * FROM patients WHERE id = ?', (patient_id,))
+            patient = c.fetchone()
+            
+            if not patient:
+                conn.close()
+                return jsonify({'success': False, 'message': 'Patient not found'}), 404
+            
+            c.execute('SELECT * FROM dryeye_results WHERE patient_id = ? ORDER BY timestamp DESC LIMIT 1', (patient_id,))
+            result = c.fetchone()
+            
+            conn.close()
+        
+        if not result:
+            return jsonify({'success': False, 'message': 'No dry eye screening results found'}), 404
+        
+        # Create PDF
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#0066cc'), spaceAfter=12, alignment=TA_CENTER)
+        heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor('#0066cc'), spaceAfter=10, spaceBefore=12)
+        
+        # Header
+        story.append(Paragraph("NAYAN-AI", title_style))
+        story.append(Paragraph("Dry Eye Detection Report", styles['Heading2']))
+        story.append(Paragraph("AI-Assisted Eye Screening System", styles['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Patient Information
+        story.append(Paragraph("Patient Information", heading_style))
+        patient_data = [
+            ['Name:', patient['name'] or '--', 'Age:', f"{patient['age']} years" if patient['age'] else '--'],
+            ['Gender:', patient['gender'] or '--', 'Date:', result['timestamp'][:10] if result['timestamp'] else '--'],
+        ]
+        patient_table = Table(patient_data, colWidths=[1*inch, 2.5*inch, 1*inch, 2.5*inch])
+        patient_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
+            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f0f0f0')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ]))
+        story.append(patient_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Test Results
+        story.append(Paragraph("Test Results", heading_style))
+        risk_color = colors.HexColor('#fff3cd') if 'Risk' in (result['label'] or '') else colors.HexColor('#d4edda')
+        result_box = [['Risk Assessment:', result['label'] or '--']]
+        result_table = Table(result_box, colWidths=[2*inch, 5*inch])
+        result_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), risk_color),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 12),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('BOX', (0, 0), (-1, -1), 2, colors.HexColor('#0066cc')),
+        ]))
+        story.append(result_table)
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Detailed Metrics
+        story.append(Paragraph("Detailed Metrics", heading_style))
+        metrics_data = [
+            ['Metric', 'Value'],
+            ['Blink Count', str(result['blink_count']) if result['blink_count'] else '--'],
+            ['Blink Rate (BPM)', f"{result['blink_rate_bpm']:.1f}" if result['blink_rate_bpm'] else '--'],
+            ['Mean Eye-Open Duration', f"{result['mean_ibi_sec']:.2f} s" if result['mean_ibi_sec'] else '--'],
+            ['Max Eye-Open Duration', f"{result['max_eye_open_sec']:.2f} s" if result['max_eye_open_sec'] else '--'],
+        ]
+        metrics_table = Table(metrics_data, colWidths=[3.5*inch, 3.5*inch])
+        metrics_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f9f9f9')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9f9f9')]),
+        ]))
+        story.append(metrics_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Interpretation
+        story.append(Paragraph("Interpretation", heading_style))
+        interp_text = "Dry eye risk assessment based on blink patterns analysis. Low blink rates or long eye-open durations may indicate possible dryness. This is a screening support tool only and should not be used as a medical diagnosis. Please consult an ophthalmologist for professional evaluation."
+        story.append(Paragraph(interp_text, styles['Normal']))
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Footer
+        footer_style = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#999999'), alignment=TA_CENTER)
+        story.append(Paragraph("<strong>NAYAN-AI</strong> - AI-Assisted Eye Screening System", footer_style))
+        story.append(Paragraph("Developed by: Krishnapriya S, Madhumitha S, Mahalakshmi B S", footer_style))
+        story.append(Paragraph("Electronics and Communication Engineering Department", footer_style))
+        story.append(Paragraph(f"Generated on: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}", footer_style))
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        
+        filename = f"DryEye_Report_{patient['name']}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
+    
+    except Exception as e:
+        import traceback
+        print(f"[DRYEYE PDF] Error: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'success': False, 'message': f'Error generating PDF: {str(e)}'}), 500
+
+@app.route('/api/report/glaucoma/pdf/<int:patient_id>', methods=['GET'])
+def generate_glaucoma_pdf(patient_id):
+    """Generate PDF report for glaucoma screening"""
+    try:
+        from reportlab.lib.pagesizes import letter
+        from reportlab.lib import colors
+        from reportlab.lib.units import inch
+        from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+        from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+        from reportlab.lib.enums import TA_CENTER, TA_LEFT
+        from io import BytesIO
+        
+        # Get patient info and results
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH)
+            conn.row_factory = sqlite3.Row
+            c = conn.cursor()
+            
+            c.execute('SELECT * FROM patients WHERE id = ?', (patient_id,))
+            patient = c.fetchone()
+            
+            if not patient:
+                conn.close()
+                return jsonify({'success': False, 'message': 'Patient not found'}), 404
+            
+            c.execute('SELECT * FROM glaucoma_results WHERE patient_id = ? ORDER BY timestamp DESC LIMIT 1', (patient_id,))
+            result = c.fetchone()
+            
+            conn.close()
+        
+        if not result:
+            return jsonify({'success': False, 'message': 'No glaucoma screening results found'}), 404
+        
+        # Create PDF
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(buffer, pagesize=letter, topMargin=0.5*inch, bottomMargin=0.5*inch)
+        story = []
+        styles = getSampleStyleSheet()
+        
+        # Custom styles
+        title_style = ParagraphStyle('CustomTitle', parent=styles['Heading1'], fontSize=24, textColor=colors.HexColor('#0066cc'), spaceAfter=12, alignment=TA_CENTER)
+        heading_style = ParagraphStyle('CustomHeading', parent=styles['Heading2'], fontSize=14, textColor=colors.HexColor('#0066cc'), spaceAfter=10, spaceBefore=12)
+        
+        # Header
+        story.append(Paragraph("NAYAN-AI", title_style))
+        story.append(Paragraph("Glaucoma Screening Report", styles['Heading2']))
+        story.append(Paragraph("AI-Assisted Eye Screening System", styles['Normal']))
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Patient Information
+        story.append(Paragraph("Patient Information", heading_style))
+        patient_data = [
+            ['Name:', patient['name'] or '--', 'Age:', f"{patient['age']} years" if patient['age'] else '--'],
+            ['Gender:', patient['gender'] or '--', 'Date:', result['timestamp'][:10] if result['timestamp'] else '--'],
+        ]
+        patient_table = Table(patient_data, colWidths=[1*inch, 2.5*inch, 1*inch, 2.5*inch])
+        patient_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (0, -1), colors.HexColor('#f0f0f0')),
+            ('BACKGROUND', (2, 0), (2, -1), colors.HexColor('#f0f0f0')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, -1), 'Helvetica-Bold'),
+            ('FONTNAME', (2, 0), (2, -1), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+            ('TOPPADDING', (0, 0), (-1, -1), 8),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+        ]))
+        story.append(patient_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Test Results
+        story.append(Paragraph("Test Results", heading_style))
+        risk_level = result['risk_level'] or 'Normal'
+        risk_color = colors.HexColor('#fff3cd') if 'High' in risk_level or 'Moderate' in risk_level else colors.HexColor('#d4edda')
+        result_box = [['Risk Assessment:', risk_level]]
+        result_table = Table(result_box, colWidths=[2*inch, 5*inch])
+        result_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, -1), risk_color),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (0, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 11),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 12),
+            ('TOPPADDING', (0, 0), (-1, -1), 12),
+            ('LEFTPADDING', (0, 0), (-1, -1), 10),
+            ('BOX', (0, 0), (-1, -1), 2, colors.HexColor('#0066cc')),
+        ]))
+        story.append(result_table)
+        story.append(Spacer(1, 0.2*inch))
+        
+        # Detailed Metrics
+        story.append(Paragraph("Detailed Metrics", heading_style))
+        metrics_data = [
+            ['Metric', 'Value'],
+            ['IOP Proxy (mmHg)', f"{result['iop_proxy']:.1f}" if result['iop_proxy'] else '--'],
+            ['Delta (mm)', '0.5 mm'],
+            ['K Proxy Value', f"{result['iop_proxy']:.2f}" if result['iop_proxy'] else '--'],
+        ]
+        metrics_table = Table(metrics_data, colWidths=[3.5*inch, 3.5*inch])
+        metrics_table.setStyle(TableStyle([
+            ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor('#f9f9f9')),
+            ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+            ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+            ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+            ('FONTSIZE', (0, 0), (-1, -1), 10),
+            ('BOTTOMPADDING', (0, 0), (-1, -1), 10),
+            ('TOPPADDING', (0, 0), (-1, -1), 10),
+            ('GRID', (0, 0), (-1, -1), 0.5, colors.grey),
+            ('ROWBACKGROUNDS', (0, 1), (-1, -1), [colors.white, colors.HexColor('#f9f9f9')]),
+        ]))
+        story.append(metrics_table)
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Interpretation
+        story.append(Paragraph("Interpretation", heading_style))
+        interp_text = "Glaucoma risk assessment based on IOP proxy measurement. Elevated IOP proxy values may indicate increased risk. This is a screening support tool only and should not be used as a medical diagnosis. Please consult an ophthalmologist for professional evaluation and proper IOP measurement."
+        story.append(Paragraph(interp_text, styles['Normal']))
+        story.append(Spacer(1, 0.3*inch))
+        
+        # Footer
+        footer_style = ParagraphStyle('Footer', parent=styles['Normal'], fontSize=8, textColor=colors.HexColor('#999999'), alignment=TA_CENTER)
+        story.append(Paragraph("<strong>NAYAN-AI</strong> - AI-Assisted Eye Screening System", footer_style))
+        story.append(Paragraph("Developed by: Krishnapriya S, Madhumitha S, Mahalakshmi B S", footer_style))
+        story.append(Paragraph("Electronics and Communication Engineering Department", footer_style))
+        story.append(Paragraph(f"Generated on: {datetime.now().strftime('%B %d, %Y at %I:%M %p')}", footer_style))
+        
+        # Build PDF
+        doc.build(story)
+        buffer.seek(0)
+        
+        filename = f"Glaucoma_Report_{patient['name']}_{datetime.now().strftime('%Y%m%d')}.pdf"
+        return send_file(buffer, mimetype='application/pdf', as_attachment=True, download_name=filename)
+    
+    except Exception as e:
+        import traceback
+        print(f"[GLAUCOMA PDF] Error: {str(e)}\n{traceback.format_exc()}")
+        return jsonify({'success': False, 'message': f'Error generating PDF: {str(e)}'}), 500
+
 # ============== WEBSOCKET CAMERA STREAMING ==============
 active_streams = {}
 camera_lock = Lock()
