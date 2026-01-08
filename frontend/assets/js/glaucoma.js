@@ -130,6 +130,127 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Save to session
         sessionStorage.setItem('glaucomaResults', JSON.stringify(analysis));
+
+        // Update print template
+        updatePrintTemplate(analysis);
+
+        // Update detailed table
+        if (document.getElementById('deviceId')) {
+            document.getElementById('deviceId').textContent = 'ESP32-GLAUCOMA';
+            document.getElementById('deltaMm').textContent = '0.5 mm';
+            document.getElementById('kProxy').textContent = iop.toFixed(2);
+            document.getElementById('timestamp').textContent = new Date().toLocaleString();
+        }
+    }
+
+    function updatePrintTemplate(analysis) {
+        const patientData = JSON.parse(sessionStorage.getItem('patientData') || '{}');
+
+        // Patient information
+        if (document.getElementById('printPatientName')) {
+            document.getElementById('printPatientName').textContent = patientData.name || '--';
+            document.getElementById('printPatientAge').textContent = patientData.age || '--';
+            document.getElementById('printPatientGender').textContent = patientData.gender || '--';
+            document.getElementById('printDate').textContent = new Date().toLocaleDateString();
+
+            // Test results
+            document.getElementById('printRiskLabel').textContent = analysis.risk_level;
+            const printRiskLabel = document.getElementById('printRiskLabel').parentElement;
+            if (analysis.risk_level && !analysis.risk_level.includes('Normal') && !analysis.risk_level.includes('Low')) {
+                printRiskLabel.style.backgroundColor = '#fff3cd';
+                printRiskLabel.style.borderLeftColor = '#ff9800';
+            } else {
+                printRiskLabel.style.backgroundColor = '#d4edda';
+                printRiskLabel.style.borderLeftColor = '#28a745';
+            }
+
+            // Metrics
+            document.getElementById('printIOP').textContent = analysis.iop_proxy.toFixed(1) + ' mmHg';
+            document.getElementById('printDelta').textContent = '0.5 mm';
+            document.getElementById('printKProxy').textContent = analysis.iop_proxy.toFixed(2);
+
+            // Generated date
+            document.getElementById('printGeneratedDate').textContent = new Date().toLocaleString();
+        }
+    }
+
+    // Print functionality
+    const printBtn = document.getElementById('printBtn');
+    if (printBtn) {
+        printBtn.addEventListener('click', function() {
+            const template = document.getElementById('printTemplate');
+            const printContent = template ? template.innerHTML : '';
+            const printWindow = window.open('', '', 'height=600,width=800');
+
+            if (!printWindow) {
+                alert('Popup blocked. Please allow popups to print.');
+                return;
+            }
+
+            printWindow.document.write(`
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Glaucoma Screening Report - NAYAN-AI</title>
+                    <style>
+                        @media print { body { margin: 0; padding: 20px; } }
+                        body { font-family: Arial, sans-serif; }
+                    </style>
+                </head>
+                <body>
+                    ${printContent}
+                </body>
+                </html>
+            `);
+            printWindow.document.close();
+            printWindow.print();
+        });
+    }
+
+    // Download functionality (PDF report)
+    const downloadBtn = document.getElementById('downloadBtn');
+    if (downloadBtn) {
+        downloadBtn.addEventListener('click', function() {
+            const patientId = sessionStorage.getItem('patientId');
+            
+            if (!patientId) {
+                alert('Patient ID not found');
+                return;
+            }
+            
+            // Show loading
+            const originalText = downloadBtn.innerHTML;
+            downloadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating PDF...';
+            downloadBtn.disabled = true;
+            
+            // Download PDF
+            fetch(`${API_BASE}/report/glaucoma/pdf/${patientId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to generate PDF');
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const patientData = JSON.parse(sessionStorage.getItem('patientData') || '{}');
+                    a.download = `Glaucoma_Report_${patientData.name || 'Patient'}_${new Date().toISOString().split('T')[0]}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                })
+                .catch(error => {
+                    console.error('Error downloading PDF:', error);
+                    alert('Failed to generate PDF report. Please try Print instead.');
+                })
+                .finally(() => {
+                    downloadBtn.innerHTML = originalText;
+                    downloadBtn.disabled = false;
+                });
+        });
     }
 
     function startAutoRefresh() {

@@ -191,9 +191,19 @@
                             </div>
 
                             <!-- Timestamp -->
-                            <div class="d-flex justify-content-between text-muted small">
+                            <div class="d-flex justify-content-between text-muted small mb-3">
                                 <span><i class="bi bi-clock me-1"></i>Timestamp: <span id="resultTimestamp">--</span></span>
                                 <span class="text-success"><i class="bi bi-check-circle me-1"></i>Result saved</span>
+                            </div>
+
+                            <!-- Action Buttons -->
+                            <div class="d-flex gap-2">
+                                <button type="button" class="btn btn-primary" id="printBtn">
+                                    <i class="bi bi-printer me-2"></i>Print Results
+                                </button>
+                                <button type="button" class="btn btn-secondary" id="downloadBtn">
+                                    <i class="bi bi-download me-2"></i>Download Report
+                                </button>
                             </div>
                         </div>
 
@@ -247,6 +257,83 @@
             </div>
         </div>
     </section>
+
+    <!-- Print Template (Hidden) -->
+    <div id="printTemplate" style="display: none;">
+        <div style="width: 100%; max-width: 800px; margin: 0 auto; padding: 40px; font-family: Arial, sans-serif;">
+            <!-- Header -->
+            <div style="text-align: center; margin-bottom: 30px; border-bottom: 2px solid #0066cc; padding-bottom: 20px;">
+                <h1 style="color: #0066cc; margin: 0;"><i class="bi bi-eye-fill"></i> NAYAN-AI</h1>
+                <p style="color: #666; margin: 5px 0;">AI-Assisted Eye Screening System</p>
+                <p style="color: #999; font-size: 12px; margin: 5px 0;">Cataract Detection Report</p>
+            </div>
+
+            <!-- Patient Information -->
+            <div style="margin-bottom: 30px;">
+                <h3 style="color: #0066cc; border-bottom: 1px solid #ddd; padding-bottom: 10px;">Patient Information</h3>
+                <table style="width: 100%; margin-top: 10px;">
+                    <tr>
+                        <td style="padding: 5px; width: 50%;"><strong>Name:</strong> <span id="printPatientName">--</span></td>
+                        <td style="padding: 5px;"><strong>Age:</strong> <span id="printPatientAge">--</span></td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 5px;"><strong>Gender:</strong> <span id="printPatientGender">--</span></td>
+                        <td style="padding: 5px;"><strong>Date:</strong> <span id="printDate">--</span></td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- Test Results -->
+            <div style="margin-bottom: 30px;">
+                <h3 style="color: #0066cc; border-bottom: 1px solid #ddd; padding-bottom: 10px;">Test Results</h3>
+                <div style="background-color: #f0f8ff; padding: 15px; border-left: 4px solid #0066cc; margin: 15px 0;">
+                    <p style="margin: 0;"><strong>Risk Assessment:</strong> <span id="printRiskLabel" style="font-size: 16px; font-weight: bold;">Normal</span></p>
+                </div>
+            </div>
+
+            <!-- Detailed Metrics -->
+            <div style="margin-bottom: 30px;">
+                <h3 style="color: #0066cc; border-bottom: 1px solid #ddd; padding-bottom: 10px;">Detailed Metrics</h3>
+                <table style="width: 100%; border-collapse: collapse; margin-top: 10px;">
+                    <tr style="background-color: #f9f9f9;">
+                        <th style="padding: 10px; text-align: left; border-bottom: 1px solid #ddd;"><strong>Metric</strong></th>
+                        <th style="padding: 10px; text-align: left; border-bottom: 1px solid #ddd;"><strong>Value</strong></th>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border-bottom: 1px solid #eee;">Contrast</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #eee;" id="printContrast">--</td>
+                    </tr>
+                    <tr style="background-color: #f9f9f9;">
+                        <td style="padding: 10px; border-bottom: 1px solid #eee;">Sharpness</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #eee;" id="printSharpness">--</td>
+                    </tr>
+                    <tr>
+                        <td style="padding: 10px; border-bottom: 1px solid #eee;">Edge Strength</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #eee;" id="printEdge">--</td>
+                    </tr>
+                    <tr style="background-color: #f9f9f9;">
+                        <td style="padding: 10px; border-bottom: 1px solid #eee;">Confidence</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #eee;" id="printConfidence">--</td>
+                    </tr>
+                </table>
+            </div>
+
+            <!-- Interpretation -->
+            <div style="margin-bottom: 30px; background-color: #f0f0f0; padding: 15px; border-radius: 5px;">
+                <h4 style="color: #0066cc; margin-top: 0;">Interpretation</h4>
+                <p style="margin: 0; color: #333; line-height: 1.6;">Cataract risk assessment based on image analysis using AI deep learning model (MobileNetV2). This is a screening support tool only and should not be used as a medical diagnosis. Please consult an ophthalmologist for professional evaluation.</p>
+            </div>
+
+            <!-- Footer -->
+            <div style="border-top: 2px solid #0066cc; padding-top: 20px; text-align: center; color: #999; font-size: 11px;">
+                <p style="margin: 5px 0;"><strong>NAYAN-AI</strong> - AI-Assisted Eye Screening System</p>
+                <p style="margin: 5px 0;">Developed by: Krishnapriya S, Madhumitha S, Mahalakshmi B S</p>
+                <p style="margin: 5px 0;">Electronics and Communication Engineering Department</p>
+                <p style="margin: 5px 0;">Generated on: <span id="printGeneratedDate">--</span></p>
+                <p style="margin: 10px 0 0 0; font-style: italic;">This report is confidential and intended only for the use of the individual to whom it is addressed.</p>
+            </div>
+        </div>
+    </div>
 
     <!-- Footer -->
     <footer class="bg-dark text-white py-3 mt-5">

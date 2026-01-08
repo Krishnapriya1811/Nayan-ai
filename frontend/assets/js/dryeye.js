@@ -207,28 +207,48 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Download functionality (JSON report)
+    // Download functionality (PDF report)
     if (downloadBtn) {
         downloadBtn.addEventListener('click', function() {
-            const patientData = JSON.parse(sessionStorage.getItem('patientData') || '{}');
-            const dryeyeResults = JSON.parse(sessionStorage.getItem('dryEyeResults') || '{}');
-
-            const reportData = {
-                patient: patientData,
-                test_type: 'Dry Eye Detection',
-                results: dryeyeResults,
-                date: new Date().toISOString()
-            };
-
-            const dataStr = JSON.stringify(reportData, null, 2);
-            const dataUri = 'data:application/json;charset=utf-8,' + encodeURIComponent(dataStr);
-
-            const exportFileDefaultName = `dry_eye_report_${Date.now()}.json`;
-
-            const linkElement = document.createElement('a');
-            linkElement.setAttribute('href', dataUri);
-            linkElement.setAttribute('download', exportFileDefaultName);
-            linkElement.click();
+            const patientId = sessionStorage.getItem('patientId');
+            
+            if (!patientId) {
+                alert('Patient ID not found');
+                return;
+            }
+            
+            // Show loading
+            const originalText = downloadBtn.innerHTML;
+            downloadBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Generating PDF...';
+            downloadBtn.disabled = true;
+            
+            // Download PDF
+            fetch(`${API_BASE}/report/dryeye/pdf/${patientId}`)
+                .then(response => {
+                    if (!response.ok) {
+                        throw new Error('Failed to generate PDF');
+                    }
+                    return response.blob();
+                })
+                .then(blob => {
+                    const url = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = url;
+                    const patientData = JSON.parse(sessionStorage.getItem('patientData') || '{}');
+                    a.download = `DryEye_Report_${patientData.name || 'Patient'}_${new Date().toISOString().split('T')[0]}.pdf`;
+                    document.body.appendChild(a);
+                    a.click();
+                    window.URL.revokeObjectURL(url);
+                    document.body.removeChild(a);
+                })
+                .catch(error => {
+                    console.error('Error downloading PDF:', error);
+                    alert('Failed to generate PDF report. Please try Print instead.');
+                })
+                .finally(() => {
+                    downloadBtn.innerHTML = originalText;
+                    downloadBtn.disabled = false;
+                });
         });
     }
 });

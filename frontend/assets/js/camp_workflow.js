@@ -129,6 +129,10 @@ async function handlePatientSubmit(e) {
             currentPatientId = data.patient_id;
             sessionStorage.setItem('patientId', currentPatientId);
             sessionStorage.setItem('patientData', JSON.stringify(patientData));
+
+            // Fallback for report page / refresh scenarios
+            localStorage.setItem('campLastPatientId', String(currentPatientId));
+            localStorage.setItem('campLastPatientData', JSON.stringify(patientData));
             
             patientCount++;
             localStorage.setItem('campPatientCount', patientCount);

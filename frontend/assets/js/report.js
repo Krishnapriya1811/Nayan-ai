@@ -9,8 +9,33 @@ let dryeyeResults = [];
 let glaucomaResults = [];
 
 document.addEventListener('DOMContentLoaded', function() {
+    // Prefer sessionStorage, but allow fallback restoration (e.g. CAMP/report navigation)
+    const restoredUserId = sessionStorage.getItem('userId') || localStorage.getItem('userId');
+    if (restoredUserId && !sessionStorage.getItem('userId')) {
+        sessionStorage.setItem('userId', restoredUserId);
+    }
+
+    const restoredUserName = sessionStorage.getItem('userName') || localStorage.getItem('userName');
+    if (restoredUserName && !sessionStorage.getItem('userName')) {
+        sessionStorage.setItem('userName', restoredUserName);
+    }
+
+    let patientId = sessionStorage.getItem('patientId');
+    if (!patientId) {
+        patientId = localStorage.getItem('campLastPatientId') || localStorage.getItem('patientId');
+        if (patientId) {
+            sessionStorage.setItem('patientId', patientId);
+        }
+    }
+
+    if (!sessionStorage.getItem('patientData')) {
+        const fallbackPatientData = localStorage.getItem('campLastPatientData');
+        if (fallbackPatientData) {
+            sessionStorage.setItem('patientData', fallbackPatientData);
+        }
+    }
+
     const userId = sessionStorage.getItem('userId');
-    const patientId = sessionStorage.getItem('patientId');
 
     if (!userId) {
         alert('Please login first');
@@ -140,7 +165,12 @@ function displayDryeyeSummary() {
 
     const latest = dryeyeResults[0];
     const label = String(latest.label || latest[9] || 'Normal');
-    const blinkRate = Number(latest.blink_rate || latest[5] || 0);
+    const blinkRate = Number(
+        latest.blink_rate_bpm ??
+        latest.blink_rate ??
+        latest[5] ??
+        0
+    );
     
     if (label.toLowerCase().includes('risk') || label.toLowerCase().includes('dry')) {
         badge.className = 'risk-badge badge bg-warning text-dark';
@@ -237,11 +267,16 @@ function displayDryeyeDetails() {
     dryeyeResults.forEach(result => {
         const timestamp = result.timestamp || result[10];
         const timestampStr = timestamp ? new Date(timestamp).toLocaleString() : '--';
-        const duration = Number(result.duration || result[3] || 0).toFixed(1);
-        const blinks = result.blinks || result[4] || 0;
-        const blinkRate = Number(result.blink_rate || result[5] || 0).toFixed(1);
-        const meanIbi = Number(result.mean_ibi || result[6] || 0).toFixed(2);
-        const maxEyeOpen = Number(result.max_eye_open_time || result[8] || 0).toFixed(2);
+        const duration = Number(result.duration_sec ?? result.duration ?? result[3] ?? 0).toFixed(1);
+        const blinks = Number(result.blink_count ?? result.blinks ?? result[4] ?? 0);
+        const blinkRate = Number(
+            result.blink_rate_bpm ??
+            result.blink_rate ??
+            result[5] ??
+            0
+        ).toFixed(1);
+        const meanIbi = Number(result.mean_ibi_sec ?? result.mean_ibi ?? result[6] ?? 0).toFixed(2);
+        const maxEyeOpen = Number(result.max_eye_open_sec ?? result.max_eye_open_time ?? result[8] ?? 0).toFixed(2);
         const label = String(result.label || result[9] || 'Normal');
         const videoFile = result.video_file || result[2];
         const badgeClass = label.toLowerCase().includes('risk') || label.toLowerCase().includes('dry') ? 'bg-warning text-dark' : 'bg-success';
@@ -363,9 +398,50 @@ function generateRecommendations() {
 }
 
 function downloadPDF() {
-    // For now, use print to PDF (browser native)
-    alert('Use the "Print Report" button and select "Save as PDF" in your browser\'s print dialog.');
-    window.print();
+    const patientId = sessionStorage.getItem('patientId');
+    
+    if (!patientId) {
+        alert('Patient ID not found. Please complete patient information first.');
+        return;
+    }
+    
+    // Show loading message
+    const btn = document.getElementById('downloadPdfBtn');
+    const originalText = btn.innerHTML;
+    btn.innerHTML = '<i class="bi bi-hourglass-split me-2"></i>Generating PDF...';
+    btn.disabled = true;
+    
+    // Call backend API to generate PDF
+    fetch(`${API_BASE}/report/pdf/${patientId}`)
+        .then(response => {
+            if (!response.ok) {
+                throw new Error('Failed to generate PDF report');
+            }
+            return response.blob();
+        })
+        .then(blob => {
+            // Create download link
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = `NAYAN-AI_Report_${patientInfo?.name || 'Patient'}_${new Date().toISOString().split('T')[0]}.pdf`;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+            
+            // Reset button
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        })
+        .catch(error => {
+            console.error('Error downloading PDF:', error);
+            alert('Failed to generate PDF report. Please try again or use the Print button as an alternative.');
+            
+            // Reset button
+            btn.innerHTML = originalText;
+            btn.disabled = false;
+        });
 }
 
 function exportToExcel() {
