@@ -7,6 +7,7 @@ var API_BASE = `${window.location.origin}/api`;
 
 let cataractResults = [];
 let dryeyeResults = [];
+let glaucomaResults = [];
 
 document.addEventListener('DOMContentLoaded', function() {
     const userId = sessionStorage.getItem('userId');
@@ -35,6 +36,10 @@ document.addEventListener('DOMContentLoaded', function() {
     if (dryeyeSearch) {
         dryeyeSearch.addEventListener('input', () => renderDryeyeTable());
     }
+    const glaucomaSearch = document.getElementById('glaucomaSearch');
+    if (glaucomaSearch) {
+        glaucomaSearch.addEventListener('input', () => renderGlaucomaTable());
+    }
 
     // Tab switching (reload on tab click to stay fresh)
     const tabs = document.querySelectorAll('[role="tab"]');
@@ -48,6 +53,7 @@ document.addEventListener('DOMContentLoaded', function() {
 function loadResults() {
     loadCataractRecords();
     loadDryeyeRecords();
+    loadGlaucomaRecords();
 }
 
 function loadCataractRecords() {
@@ -230,6 +236,93 @@ function renderDryeyeTable() {
                         </a>
                     ` : ''}
                 </td>
+            </tr>
+        `;
+    });
+
+    html += `
+                </tbody>
+            </table>
+        </div>
+    `;
+
+    container.innerHTML = html;
+}
+
+function loadGlaucomaRecords() {
+    const patientId = sessionStorage.getItem('patientId');
+    const container = document.getElementById('glaucomaTable');
+
+    if (!container) return;
+
+    fetch(`${API_BASE}/results/glaucoma/${patientId}`)
+        .then(response => response.json())
+        .then(data => {
+            glaucomaResults = (data && data.success && Array.isArray(data.results)) ? data.results : [];
+            renderGlaucomaTable();
+        })
+        .catch(error => {
+            console.error('Error:', error);
+            container.innerHTML = `
+                <div class="alert alert-danger">
+                    Error loading glaucoma records. Backend may not be available.
+                </div>
+            `;
+        });
+}
+
+function renderGlaucomaTable() {
+    const container = document.getElementById('glaucomaTable');
+    if (!container) return;
+
+    const query = (document.getElementById('glaucomaSearch')?.value || '').toLowerCase();
+    const filtered = glaucomaResults.filter(row => {
+        // Schema: (id, patient_id, iop_proxy, risk_level, timestamp)
+        const riskLevel = String(row[3] ?? '').toLowerCase();
+        const ts = String(row[4] ?? '').toLowerCase();
+        return !query || riskLevel.includes(query) || ts.includes(query);
+    });
+
+    if (filtered.length === 0) {
+        container.innerHTML = `
+            <div class="alert alert-info text-center">
+                <i class="bi bi-info-circle me-2"></i>No glaucoma screening records found.
+            </div>
+        `;
+        return;
+    }
+
+    let html = `
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>Date</th>
+                        <th>IOP Measurement</th>
+                        <th>Risk Level</th>
+                        <th>Notes</th>
+                    </tr>
+                </thead>
+                <tbody>
+    `;
+
+    filtered.forEach(result => {
+        const timestamp = result[4] ? new Date(result[4]).toLocaleString() : '--';
+        const iop = Number(result[2]);
+        const riskLevel = String(result[3] ?? '');
+        let resultClass = 'bg-success';
+        if (riskLevel.includes('High')) {
+            resultClass = 'bg-danger';
+        } else if (riskLevel.includes('Low')) {
+            resultClass = 'bg-info';
+        }
+
+        html += `
+            <tr>
+                <td>${timestamp}</td>
+                <td>${Number.isFinite(iop) ? iop.toFixed(1) + ' mmHg' : '--'}</td>
+                <td><span class="badge ${resultClass}">${riskLevel}</span></td>
+                <td>Tonometer measurement</td>
             </tr>
         `;
     });

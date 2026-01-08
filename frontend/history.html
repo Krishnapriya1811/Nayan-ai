@@ -32,6 +32,9 @@
                     <li class="nav-item">
                         <a class="nav-link active" href="history.html"><i class="bi bi-clock-history me-1"></i>History</a>
                     </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="report.html"><i class="bi bi-file-medical me-1"></i>Full Report</a>
+                    </li>
                 </ul>
             </div>
         </div>
@@ -71,6 +74,11 @@
                                     <i class="bi bi-droplet me-2"></i>Dry Eye
                                 </button>
                             </li>
+                            <li class="nav-item" role="presentation">
+                                <button class="nav-link" id="glaucoma-tab" data-bs-toggle="tab" data-bs-target="#glaucoma" type="button" role="tab">
+                                    <i class="bi bi-eye me-2"></i>Glaucoma
+                                </button>
+                            </li>
                         </ul>
 
                         <!-- Tab Content -->
@@ -100,6 +108,18 @@
                                 </div>
                             </div>
 
+                            <!-- Glaucoma Tab -->
+                            <div class="tab-pane fade" id="glaucoma" role="tabpanel" aria-labelledby="glaucoma-tab">
+                                <div class="mb-3">
+                                    <input type="text" class="form-control" id="glaucomaSearch" placeholder="Search glaucoma records...">
+                                </div>
+                                <div id="glaucomaTable">
+                                    <div class="alert alert-info text-center">
+                                        <i class="bi bi-info-circle me-2"></i>No glaucoma screening records found.
+                                    </div>
+                                </div>
+                            </div>
+
                         </div>
                     </div>
                 </div>
@@ -107,6 +127,9 @@
                 <!-- Download Section -->
                 <div class="row mt-4">
                     <div class="col-md-12">
+                        <a href="report.html" class="btn btn-success me-2">
+                            <i class="bi bi-file-medical me-2"></i>View Comprehensive Report
+                        </a>
                         <button class="btn btn-primary me-2">
                             <i class="bi bi-download me-2"></i>Download Records
                         </button>

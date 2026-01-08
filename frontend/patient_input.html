@@ -3,67 +3,331 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Patient Input - NAYAN-AI</title>
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/css/bootstrap.min.css" rel="stylesheet">
-    <link rel="stylesheet" href="assets/css/style.css">
+    <title>Patient Information | NAYAN-AI</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
+    <link href="assets/css/style.css" rel="stylesheet">
 </head>
 <body>
-    <nav class="navbar navbar-expand-lg navbar-light bg-light">
-        <div class="container-fluid">
-            <a class="navbar-brand" href="index.html">NAYAN-AI</a>
-            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Toggle navigation">
+    <!-- Navigation -->
+    <nav class="navbar navbar-expand-lg navbar-dark bg-primary sticky-top">
+        <div class="container">
+            <a class="navbar-brand fw-bold" href="index.html">
+                <i class="bi bi-eye-fill me-2"></i>NAYAN-AI
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
-                <ul class="navbar-nav">
+                <ul class="navbar-nav ms-auto">
                     <li class="nav-item">
-                        <a class="nav-link" href="index.html">Home</a>
+                        <a class="nav-link" href="index.html"><i class="bi bi-house-door me-1"></i>Home</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="cataract.html">Cataract Detection</a>
+                        <a class="nav-link" href="cataract.html"><i class="bi bi-camera me-1"></i>Cataract</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="dryeye.html">Dry Eye Detection</a>
+                        <a class="nav-link" href="dryeye.html"><i class="bi bi-droplet me-1"></i>Dry Eye</a>
                     </li>
                     <li class="nav-item">
-                        <a class="nav-link" href="history.html">History</a>
+                        <a class="nav-link" href="glaucoma.html"><i class="bi bi-activity me-1"></i>Glaucoma</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="history.html"><i class="bi bi-clock-history me-1"></i>History</a>
+                    </li>
+                    <li class="nav-item">
+                        <button class="btn btn-sm btn-light ms-2" id="logoutBtn">
+                            <i class="bi bi-box-arrow-right me-1"></i>Logout
+                        </button>
                     </li>
                 </ul>
             </div>
         </div>
     </nav>
 
-    <div class="container mt-4">
-        <h1 class="text-center">Patient Input</h1>
-        <p class="text-center">Please provide your details and concerns below.</p>
-
-        <form id="patient-input-form">
-            <div class="mb-3">
-                <label for="patient-name" class="form-label">Name</label>
-                <input type="text" class="form-control" id="patient-name" placeholder="Enter your name" required>
-            </div>
-            <div class="mb-3">
-                <label for="patient-age" class="form-label">Age</label>
-                <input type="number" class="form-control" id="patient-age" placeholder="Enter your age" required>
-            </div>
-            <div class="mb-3">
-                <label for="patient-concern" class="form-label">Concern</label>
-                <textarea class="form-control" id="patient-concern" rows="3" placeholder="Describe your concern" required></textarea>
-            </div>
-            <div class="text-center">
-                <button type="submit" class="btn btn-primary">Submit</button>
-            </div>
-        </form>
-
-        <div class="text-center mt-4">
-            <a href="cataract.html" class="btn btn-primary">Next: Cataract Detection</a>
-        </div>
+    <!-- Disclaimer -->
+    <div class="alert alert-info mb-0 rounded-0 text-center small">
+        <i class="bi bi-info-circle-fill me-1"></i>
+        <strong>Notice:</strong> Please fill in accurate patient information for proper screening records.
     </div>
 
-    <footer class="text-center mt-4">
-        <p>Screening support only. Not a medical diagnosis. Consult an ophthalmologist.</p>
+    <!-- Page Header -->
+    <section class="bg-primary text-white py-4">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1 class="display-6 mb-2"><i class="bi bi-person-badge me-2"></i>Patient Information</h1>
+                    <p class="lead mb-0">Enter patient demographics and medical history</p>
+                </div>
+                <div class="col-md-4 text-md-end">
+                    <div class="badge bg-light text-primary fs-6 px-3 py-2">
+                        <i class="bi bi-clipboard-check me-1"></i>Step 1 of Screening
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Patient Form -->
+    <section class="py-5">
+        <div class="container">
+            <div class="row justify-content-center">
+                <div class="col-lg-8">
+                    <div class="card shadow-lg border-0">
+                        <div class="card-header bg-primary text-white py-3">
+                            <h4 class="mb-0"><i class="bi bi-person-lines-fill me-2"></i>Patient Details</h4>
+                        </div>
+                        <div class="card-body p-4">
+                            <form id="patientForm" class="needs-validation" novalidate>
+                                <!-- Personal Information -->
+                                <div class="mb-4">
+                                    <h5 class="text-primary mb-3"><i class="bi bi-person-circle me-2"></i>Personal Information</h5>
+                                    <div class="row">
+                                        <div class="col-md-8 mb-3">
+                                            <label for="patientName" class="form-label fw-semibold">Full Name <span class="text-danger">*</span></label>
+                                            <input type="text" class="form-control" id="patientName" required>
+                                            <div class="invalid-feedback">Please enter patient name</div>
+                                        </div>
+                                        <div class="col-md-4 mb-3">
+                                            <label for="patientAge" class="form-label fw-semibold">Age <span class="text-danger">*</span></label>
+                                            <input type="number" class="form-control" id="patientAge" min="1" max="120" required>
+                                            <div class="invalid-feedback">Enter valid age</div>
+                                        </div>
+                                    </div>
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label for="patientGender" class="form-label fw-semibold">Gender <span class="text-danger">*</span></label>
+                                            <select class="form-select" id="patientGender" required>
+                                                <option value="">Select...</option>
+                                                <option value="Male">Male</option>
+                                                <option value="Female">Female</option>
+                                                <option value="Other">Other</option>
+                                            </select>
+                                            <div class="invalid-feedback">Please select gender</div>
+                                        </div>
+                                        <div class="col-md-6 mb-3">
+                                            <label for="patientPhone" class="form-label fw-semibold">Phone Number</label>
+                                            <input type="tel" class="form-control" id="patientPhone" placeholder="10-digit number">
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="patientEmail" class="form-label fw-semibold">Email Address</label>
+                                        <input type="email" class="form-control" id="patientEmail" placeholder="patient@example.com">
+                                    </div>
+                                </div>
+
+                                <hr class="my-4">
+
+                                <!-- Medical History -->
+                                <div class="mb-4">
+                                    <h5 class="text-primary mb-3"><i class="bi bi-heart-pulse me-2"></i>Medical History</h5>
+                                    <div class="mb-3">
+                                        <label for="medicalHistory" class="form-label fw-semibold">Current Medical Conditions</label>
+                                        <textarea class="form-control" id="medicalHistory" rows="3" placeholder="e.g., Diabetes, Hypertension, Thyroid disorders"></textarea>
+                                        <small class="text-muted">List any chronic conditions or ongoing treatments</small>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="familyHistory" class="form-label fw-semibold">Family Eye Disease History</label>
+                                        <textarea class="form-control" id="familyHistory" rows="3" placeholder="e.g., Parents/siblings with glaucoma, cataract, etc."></textarea>
+                                        <small class="text-muted">Family history of eye diseases helps assess genetic risk</small>
+                                    </div>
+                                </div>
+
+                                <hr class="my-4">
+
+                                <!-- Current Symptoms -->
+                                <div class="mb-4">
+                                    <h5 class="text-primary mb-3"><i class="bi bi-bandaid me-2"></i>Current Symptoms (Optional)</h5>
+                                    <div class="mb-3">
+                                        <label class="form-label fw-semibold">Select any symptoms you're experiencing:</label>
+                                        <div class="row">
+                                            <div class="col-md-6">
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="symptomBlur">
+                                                    <label class="form-check-label" for="symptomBlur">Blurred vision</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="symptomPain">
+                                                    <label class="form-check-label" for="symptomPain">Eye pain or discomfort</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="symptomDry">
+                                                    <label class="form-check-label" for="symptomDry">Dry or itchy eyes</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="symptomRed">
+                                                    <label class="form-check-label" for="symptomRed">Redness</label>
+                                                </div>
+                                            </div>
+                                            <div class="col-md-6">
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="symptomLight">
+                                                    <label class="form-check-label" for="symptomLight">Sensitivity to light</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="symptomHalos">
+                                                    <label class="form-check-label" for="symptomHalos">Halos around lights</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="symptomDouble">
+                                                    <label class="form-check-label" for="symptomDouble">Double vision</label>
+                                                </div>
+                                                <div class="form-check">
+                                                    <input class="form-check-input" type="checkbox" id="symptomOther">
+                                                    <label class="form-check-label" for="symptomOther">Other symptoms</label>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="mb-3">
+                                        <label for="symptomsDetail" class="form-label fw-semibold">Describe symptoms in detail</label>
+                                        <textarea class="form-control" id="symptomsDetail" rows="2" placeholder="When did symptoms start? How severe are they?"></textarea>
+                                    </div>
+                                </div>
+
+                                <!-- Submit Button -->
+                                <div class="d-grid gap-2">
+                                    <button type="submit" class="btn btn-primary btn-lg" id="submitBtn">
+                                        <i class="bi bi-check-circle me-2"></i>Save Patient Information
+                                    </button>
+                                    <button type="button" class="btn btn-outline-secondary" onclick="window.history.back()">
+                                        <i class="bi bi-arrow-left me-2"></i>Back to Dashboard
+                                    </button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+
+                    <!-- Quick Access Card -->
+                    <div class="card mt-4 border-success">
+                        <div class="card-body">
+                            <h6 class="card-title text-success"><i class="bi bi-lightning-charge-fill me-2"></i>What happens next?</h6>
+                            <p class="card-text mb-2">After saving patient information, you can proceed to:</p>
+                            <div class="d-flex gap-2 flex-wrap">
+                                <a href="glaucoma.html" class="btn btn-sm btn-outline-danger">
+                                    <i class="bi bi-activity me-1"></i>Glaucoma Test
+                                </a>
+                                <a href="cataract.html" class="btn btn-sm btn-outline-warning">
+                                    <i class="bi bi-camera me-1"></i>Cataract Test
+                                </a>
+                                <a href="dryeye.html" class="btn btn-sm btn-outline-info">
+                                    <i class="bi bi-droplet me-1"></i>Dry Eye Test
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="bg-light py-4 mt-5">
+        <div class="container text-center">
+            <p class="text-muted mb-0">
+                <i class="bi bi-shield-check me-1"></i>
+                <strong>Data Privacy:</strong> All patient information is stored securely and confidentially.
+            </p>
+        </div>
     </footer>
 
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0-alpha1/dist/js/bootstrap.bundle.min.js"></script>
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="assets/js/app.js"></script>
+    <script>
+        const API_BASE = 'http://localhost:5000/api';
+
+        // Check authentication
+        const userId = sessionStorage.getItem('userId');
+        if (!userId) {
+            alert('Please login first');
+            window.location.href = 'login.html';
+        }
+
+        // Form validation and submission
+        const form = document.getElementById('patientForm');
+        const submitBtn = document.getElementById('submitBtn');
+
+        form.addEventListener('submit', async function(e) {
+            e.preventDefault();
+            
+            if (!form.checkValidity()) {
+                e.stopPropagation();
+                form.classList.add('was-validated');
+                return;
+            }
+
+            // Gather symptom checkboxes
+            const symptoms = [];
+            ['symptomBlur', 'symptomPain', 'symptomDry', 'symptomRed', 
+             'symptomLight', 'symptomHalos', 'symptomDouble', 'symptomOther'].forEach(id => {
+                const checkbox = document.getElementById(id);
+                if (checkbox.checked) {
+                    symptoms.push(checkbox.nextElementSibling.textContent);
+                }
+            });
+
+            const symptomsText = symptoms.length > 0 ? symptoms.join(', ') : 'None reported';
+            const symptomsDetail = document.getElementById('symptomsDetail').value || '';
+            const fullSymptoms = symptomsDetail ? `${symptomsText}. Details: ${symptomsDetail}` : symptomsText;
+
+            const patientData = {
+                user_id: userId,
+                name: document.getElementById('patientName').value,
+                age: parseInt(document.getElementById('patientAge').value),
+                gender: document.getElementById('patientGender').value,
+                phone: document.getElementById('patientPhone').value || '',
+                email: document.getElementById('patientEmail').value || '',
+                medical_history: document.getElementById('medicalHistory').value || 'None reported',
+                family_history: document.getElementById('familyHistory').value || 'None reported',
+                symptoms: fullSymptoms
+            };
+
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
+
+            try {
+                const response = await fetch(`${API_BASE}/patient`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(patientData)
+                });
+
+                const result = await response.json();
+
+                if (response.ok) {
+                    sessionStorage.setItem('patientId', result.patient_id);
+                    
+                    // Success message with auto-redirect
+                    const successAlert = document.createElement('div');
+                    successAlert.className = 'alert alert-success alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3';
+                    successAlert.style.zIndex = '9999';
+                    successAlert.innerHTML = `
+                        <strong><i class="bi bi-check-circle-fill me-2"></i>Success!</strong>
+                        Patient information saved. Redirecting to screening options...
+                        <button type="button" class="btn-close" data-bs-dismiss="alert"></button>
+                    `;
+                    document.body.appendChild(successAlert);
+
+                    setTimeout(() => {
+                        window.location.href = 'index.html';
+                    }, 2000);
+                } else {
+                    throw new Error(result.error || 'Failed to save patient information');
+                }
+            } catch (error) {
+                console.error('Error:', error);
+                alert('Error: ' + error.message);
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = '<i class="bi bi-check-circle me-2"></i>Save Patient Information';
+            }
+        });
+
+        // Logout handler
+        document.getElementById('logoutBtn').addEventListener('click', function() {
+            sessionStorage.clear();
+            window.location.href = 'login.html';
+        });
+    </script>
 </body>
 </html>

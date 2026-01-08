@@ -72,15 +72,46 @@ def _load_cataract_dl_model():
             )
 
         artifacts_dir = BASE_DIR / 'catract' / 'artifacts'
-        model_path = artifacts_dir / 'cataract_mobilenetv2.keras'
         labels_path = artifacts_dir / 'labels.json'
 
-        if not model_path.exists():
-            raise FileNotFoundError(f"DL model not found at: {model_path}")
         if not labels_path.exists():
             raise FileNotFoundError(f"labels.json not found at: {labels_path}")
 
-        _CATARACT_MODEL = tf.keras.models.load_model(str(model_path))
+        # Try loading .h5 first (more stable), then .keras
+        model_path_h5 = artifacts_dir / 'cataract_mobilenetv2.h5'
+        model_path_keras = artifacts_dir / 'cataract_mobilenetv2.keras'
+        
+        model_loaded = False
+        last_error = None
+        
+        # Try .h5 format first
+        if model_path_h5.exists():
+            try:
+                print(f"Loading model from {model_path_h5}")
+                _CATARACT_MODEL = tf.keras.models.load_model(str(model_path_h5), compile=False)
+                model_loaded = True
+                print("Successfully loaded .h5 model")
+            except Exception as e:
+                print(f"Failed to load .h5 model: {e}")
+                last_error = e
+        
+        # Try .keras format if .h5 failed or doesn't exist
+        if not model_loaded and model_path_keras.exists():
+            try:
+                print(f"Loading model from {model_path_keras}")
+                _CATARACT_MODEL = tf.keras.models.load_model(str(model_path_keras), compile=False)
+                model_loaded = True
+                print("Successfully loaded .keras model")
+            except Exception as e:
+                print(f"Failed to load .keras model: {e}")
+                last_error = e
+        
+        if not model_loaded:
+            error_msg = f"Could not load model. Tried: {model_path_h5}, {model_path_keras}"
+            if last_error:
+                error_msg += f". Last error: {last_error}"
+            raise FileNotFoundError(error_msg)
+
         _CATARACT_CLASS_NAMES = json.loads(labels_path.read_text(encoding='utf-8')).get('class_names')
         if not _CATARACT_CLASS_NAMES:
             raise ValueError("labels.json missing 'class_names'")
@@ -527,16 +558,29 @@ def upload_cataract():
 
         print(f"[CATARACT] Metrics computed: {features}")
 
-        # DL prediction
-        print(f"[CATARACT] Running DL model on {filepath}")
-        pred_label, conf_percent, probs_map = predict_cataract_dl(filepath)
+        # DL prediction (primary method)
+        try:
+            print(f"[CATARACT] Running DL model on {filepath}")
+            pred_label, conf_percent, probs_map = predict_cataract_dl(filepath)
 
-        # Map model class name to UI label
-        is_risk = pred_label.strip().lower() == 'cataract'
-        features['label'] = 'Possible Cataract Risk' if is_risk else 'Normal'
-        features['confidence'] = conf_percent
-        features['dl_pred_label'] = pred_label
-        features['dl_probs'] = probs_map
+            # Map model class name to UI label
+            is_risk = pred_label.strip().lower() == 'cataract'
+            features['label'] = 'Possible Cataract Risk' if is_risk else 'Normal'
+            features['confidence'] = conf_percent
+            features['dl_pred_label'] = pred_label
+            features['dl_probs'] = probs_map
+            print(f"[CATARACT] DL prediction: {pred_label} ({conf_percent:.2f}%)")
+            
+        except Exception as dl_error:
+            # DL model failed - this should be rare
+            print(f"[CATARACT] ERROR: DL model failed: {dl_error}")
+            print(f"[CATARACT] This indicates a model loading issue. Please check model files.")
+            
+            # Return error to user instead of silently falling back
+            return jsonify({
+                'success': False, 
+                'message': f'Deep Learning model unavailable. Please contact administrator. Error: {str(dl_error)}'
+            }), 503
         
         # Save to database
         with db_lock:

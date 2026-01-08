@@ -62,6 +62,18 @@
                 <button type="button" class="btn btn-outline-primary w-100 py-2 mb-3" onclick="demoLogin()">
                     <i class="bi bi-play-circle me-2"></i>Demo Login
                 </button>
+
+                <!-- Camp Mode Button -->
+                <button type="button" class="btn btn-success w-100 py-2 mb-3" onclick="campLogin()">
+                    <i class="bi bi-clipboard-heart me-2"></i>Camp Mode (Quick Access)
+                </button>
+
+                <!-- Sign Up Button -->
+                <div class="text-center mt-3">
+                    <p class="text-muted mb-0">Don't have an account? 
+                        <a href="signin.html" class="fw-bold text-primary text-decoration-none">Sign Up</a>
+                    </p>
+                </div>
             </div>
 
             <!-- Footer -->
@@ -200,6 +212,73 @@
                 alert('Connection error. Backend may not be available.');
                 demoBtn.disabled = false;
                 demoBtn.innerHTML = originalText;
+            });
+        }
+
+        function campLogin() {
+            // Quick login for camp nurses - goes directly to camp workflow
+            const demoEmail = 'camp@nayan-ai.com';
+            const demoPassword = 'camp123';
+            
+            const campBtn = event.target;
+            campBtn.disabled = true;
+            campBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Loading Camp Mode...';
+
+            fetch(`${API_BASE}/auth/login`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({ email: demoEmail, password: demoPassword })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    sessionStorage.setItem('userId', data.user_id);
+                    sessionStorage.setItem('userName', 'Camp Nurse');
+                    sessionStorage.setItem('userEmail', demoEmail);
+
+                    localStorage.setItem('rememberMe', 'true');
+                    localStorage.setItem('userId', String(data.user_id));
+                    localStorage.setItem('userName', 'Camp Nurse');
+                    localStorage.setItem('userEmail', demoEmail);
+
+                    window.location.href = 'camp_workflow.html';
+                } else {
+                    // Create camp user if doesn't exist
+                    return fetch(`${API_BASE}/auth/register`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({ 
+                            email: demoEmail, 
+                            password: demoPassword,
+                            name: 'Camp Nurse'
+                        })
+                    });
+                }
+            })
+            .then(response => response?.json())
+            .then(data => {
+                if (data?.success) {
+                    sessionStorage.setItem('userId', data.user_id);
+                    sessionStorage.setItem('userName', 'Camp Nurse');
+                    sessionStorage.setItem('userEmail', demoEmail);
+
+                    localStorage.setItem('rememberMe', 'true');
+                    localStorage.setItem('userId', String(data.user_id));
+                    localStorage.setItem('userName', 'Camp Nurse');
+                    localStorage.setItem('userEmail', demoEmail);
+
+                    window.location.href = 'camp_workflow.html';
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                alert('Connection error. Backend may not be available.');
+                campBtn.disabled = false;
+                campBtn.innerHTML = '<i class="bi bi-clipboard-heart me-2"></i>Camp Mode (Quick Access)';
             });
         }
     </script>
