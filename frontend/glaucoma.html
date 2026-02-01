@@ -55,7 +55,7 @@
             <div class="row align-items-center">
                 <div class="col">
                     <h1 class="mb-1"><i class="bi bi-activity me-2"></i>Glaucoma Screening</h1>
-                    <p class="mb-0 opacity-75">IOP Proxy Measurement via Hardware Sensors</p>
+                    <p class="mb-0 opacity-75">Ocular Response (VL53L1X) → OMDI Risk</p>
                 </div>
                 <div class="col-auto">
                     <span class="badge bg-light text-danger fs-6">Step 1 of 3</span>
@@ -78,12 +78,13 @@
                             <ol class="mb-3">
                                 <li class="mb-2">Ensure the ESP32 hardware device is powered on</li>
                                 <li class="mb-2">Position the sensor properly on the eye area</li>
-                                <li class="mb-2">Click "Take Measurement" or wait for auto-refresh</li>
-                                <li class="mb-2">Review the IOP proxy reading and risk assessment</li>
+                                <li class="mb-2">Bind device to this patient (once)</li>
+                                <li class="mb-2">Press the <strong>Glaucoma</strong> button on the hardware</li>
+                                <li class="mb-2">Review OMDI + peak/latency/variance and risk assessment</li>
                             </ol>
                             <div class="alert alert-info small mb-0">
                                 <i class="bi bi-lightbulb-fill me-1"></i>
-                                <strong>Tip:</strong> The system auto-refreshes every 3 seconds to show the latest reading.
+                                <strong>Tip:</strong> This page auto-refreshes every 3 seconds to show the latest device reading.
                             </div>
                         </div>
                     </div>
@@ -112,10 +113,22 @@
                     <!-- Controls -->
                     <div class="card border-0 shadow-sm mb-4">
                         <div class="card-body">
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label fw-bold mb-1">Device ID</label>
+                                    <input type="text" class="form-control form-control-lg" id="glaucomaDeviceId" value="esp32cam1" placeholder="esp32cam1">
+                                    <div class="form-text">This should match the ESP32-CAM device_id used for streaming.</div>
+                                </div>
+                                <div class="col-md-6 d-flex align-items-end">
+                                    <button class="btn btn-outline-primary btn-lg w-100" id="bindDeviceBtn" type="button">
+                                        <i class="bi bi-link-45deg me-1"></i>Bind Device to Patient
+                                    </button>
+                                </div>
+                            </div>
                             <div class="row g-3 align-items-center">
                                 <div class="col-md-6">
-                                    <button class="btn btn-danger btn-lg w-100" id="measureBtn">
-                                        <i class="bi bi-play-fill me-1"></i>Take Measurement
+                                    <button class="btn btn-danger btn-lg w-100" id="measureBtn" type="button">
+                                        <i class="bi bi-play-fill me-1"></i>Start (Press Hardware Button)
                                     </button>
                                 </div>
                                 <div class="col-md-6">
@@ -148,9 +161,9 @@
                             <div class="row mb-4">
                                 <div class="col-md-6 mx-auto">
                                     <div class="iop-gauge text-center p-4 rounded-3 bg-light">
-                                        <h6 class="text-muted mb-2">IOP Proxy Value (k)</h6>
+                                        <h6 class="text-muted mb-2">OMDI</h6>
                                         <div class="display-3 fw-bold" id="kProxyValue">--</div>
-                                        <small class="text-muted">mmHg equivalent proxy</small>
+                                        <small class="text-muted">Ocular Measurement Disturbance Index</small>
                                     </div>
                                 </div>
                             </div>
@@ -164,12 +177,20 @@
                                             <td id="deviceId">--</td>
                                         </tr>
                                         <tr>
-                                            <th class="bg-light">Delta (mm)</th>
-                                            <td id="deltaMm">--</td>
+                                            <th class="bg-light">Peak (mm)</th>
+                                            <td id="peakMm">--</td>
                                         </tr>
                                         <tr>
-                                            <th class="bg-light">K Proxy</th>
-                                            <td id="kProxy">--</td>
+                                            <th class="bg-light">Recovery Latency (ms)</th>
+                                            <td id="recoveryLatency">--</td>
+                                        </tr>
+                                        <tr>
+                                            <th class="bg-light">Variance</th>
+                                            <td id="variance">--</td>
+                                        </tr>
+                                        <tr>
+                                            <th class="bg-light">OMDI</th>
+                                            <td id="omdi">--</td>
                                         </tr>
                                         <tr>
                                             <th class="bg-light">Timestamp</th>
@@ -183,7 +204,7 @@
                             <div class="alert alert-secondary mt-4 mb-3">
                                 <h6><i class="bi bi-info-circle me-1"></i>Interpretation</h6>
                                 <p class="mb-0 small" id="interpretationText">
-                                    Elevated proxy suggests possible high IOP; clinical confirmation required.
+                                    Higher OMDI suggests elevated risk; clinical confirmation required.
                                 </p>
                             </div>
 

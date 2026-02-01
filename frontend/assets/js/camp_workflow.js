@@ -12,6 +12,75 @@ let screeningResults = {
     dryeye: null
 };
 
+let campAutoNextTimer = null;
+
+function startCampCountdown({ seconds = 10, messageElId, nextStep, nextLabel }) {
+    if (campAutoNextTimer) {
+        clearInterval(campAutoNextTimer);
+        campAutoNextTimer = null;
+    }
+
+    const el = document.getElementById(messageElId);
+    if (!el) {
+        // Still proceed after delay if UI isn't present
+        setTimeout(() => goToStep(nextStep), seconds * 1000);
+        return;
+    }
+
+    // Preserve whatever result message is already being shown.
+    const baseHtml = el.dataset.baseHtml || el.innerHTML;
+    el.dataset.baseHtml = baseHtml;
+
+    let remaining = Number(seconds);
+    el.classList.remove('d-none');
+    // Keep alert styling set by the caller (risk/success), but ensure it's visible.
+    if (!el.className || !String(el.className).includes('alert')) {
+        el.className = 'alert alert-primary';
+    }
+
+    const render = () => {
+        el.innerHTML = `${baseHtml}` +
+            `<hr class="my-2">` +
+            `Auto-continuing to <strong>${nextLabel}</strong> in <strong>${remaining}s</strong>. ` +
+            `<button type="button" class="btn btn-sm btn-outline-primary ms-2" id="campAutoNextNow">Continue now</button> ` +
+            `<button type="button" class="btn btn-sm btn-outline-secondary ms-2" id="campAutoNextCancel">Cancel</button>`;
+
+        const nowBtn = document.getElementById('campAutoNextNow');
+        if (nowBtn) {
+            nowBtn.onclick = () => {
+                if (campAutoNextTimer) {
+                    clearInterval(campAutoNextTimer);
+                    campAutoNextTimer = null;
+                }
+                goToStep(nextStep);
+            };
+        }
+
+        const cancelBtn = document.getElementById('campAutoNextCancel');
+        if (cancelBtn) {
+            cancelBtn.onclick = () => {
+                if (campAutoNextTimer) {
+                    clearInterval(campAutoNextTimer);
+                    campAutoNextTimer = null;
+                }
+                el.innerHTML = `${baseHtml}<hr class="my-2">Auto-continue cancelled. Click <strong>Save & Continue</strong> when ready.`;
+            };
+        }
+    };
+
+    render();
+    campAutoNextTimer = setInterval(() => {
+        remaining -= 1;
+        if (remaining <= 0) {
+            clearInterval(campAutoNextTimer);
+            campAutoNextTimer = null;
+            goToStep(nextStep);
+            return;
+        }
+        render();
+    }, 1000);
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     const userId = sessionStorage.getItem('userId');
     if (!userId) {
@@ -28,9 +97,9 @@ function setupEventListeners() {
     // Step 1: Patient Form
     document.getElementById('patientForm')?.addEventListener('submit', handlePatientSubmit);
     
-    // Step 2: Glaucoma
+    // Step 2: Glaucoma (device-driven)
+    document.getElementById('campBindDeviceBtn')?.addEventListener('click', bindCampGlaucomaDevice);
     document.getElementById('glaucomaSubmit')?.addEventListener('click', handleGlaucomaSubmit);
-    document.getElementById('iopValue')?.addEventListener('input', calculateGlaucomaRisk);
     
     // Step 3: Cataract
     document.getElementById('cataractImage')?.addEventListener('change', handleCataractImageSelect);
@@ -152,43 +221,113 @@ async function handlePatientSubmit(e) {
     }
 }
 
-// STEP 2: Glaucoma Screening
-function calculateGlaucomaRisk() {
-    const iop = parseFloat(document.getElementById('iopValue').value);
-    const resultDiv = document.getElementById('glaucomaResult');
-    
-    if (!iop || iop < 5 || iop > 40) {
-        resultDiv.classList.add('d-none');
+// STEP 2: Glaucoma Screening (device-driven)
+let campGlaucomaPollTimer = null;
+let campLastGlaucomaResultId = null;
+
+function getCampDeviceId() {
+    return String(document.getElementById('campGlaucomaDeviceId')?.value || 'esp32cam1').trim() || 'esp32cam1';
+}
+
+async function bindCampGlaucomaDevice() {
+    if (!currentPatientId) {
+        alert('Save patient info first');
         return;
     }
-    
-    let riskLevel, riskClass, message;
-    
-    if (iop < 12) {
-        riskLevel = "Low Risk";
-        riskClass = "alert-info";
-        message = "IOP is below normal range. Monitor for hypotony.";
-    } else if (iop <= 21) {
-        riskLevel = "Normal";
-        riskClass = "alert-success";
-        message = "IOP is within normal range.";
-    } else {
-        riskLevel = "High Risk";
-        riskClass = "alert-danger";
-        message = "⚠️ ELEVATED IOP! Refer to ophthalmologist immediately.";
+
+    const btn = document.getElementById('campBindDeviceBtn');
+    const originalText = btn?.innerHTML;
+    if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Binding...';
     }
-    
-    resultDiv.className = `alert ${riskClass}`;
-    resultDiv.innerHTML = `<strong>${riskLevel}:</strong> IOP ${iop} mmHg - ${message}`;
-    resultDiv.classList.remove('d-none');
+
+    const deviceId = getCampDeviceId();
+
+    try {
+        const resp = await fetch(`${API_BASE}/device/bind`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: deviceId, patient_id: currentPatientId })
+        });
+        const data = await resp.json();
+        if (!data.success) {
+            throw new Error(data.message || 'Bind failed');
+        }
+
+        showCampGlaucomaStatus('Device bound. Now press the Glaucoma button on hardware...', 'info');
+        startCampGlaucomaPolling();
+    } catch (e) {
+        console.error(e);
+        showCampGlaucomaStatus(e.message || 'Bind failed', 'danger');
+    } finally {
+        if (btn) {
+            btn.disabled = false;
+            btn.innerHTML = originalText;
+        }
+    }
+}
+
+function showCampGlaucomaStatus(message, level = 'info') {
+    const box = document.getElementById('glaucomaResult');
+    if (!box) return;
+    box.className = `alert alert-${level}`;
+    box.innerHTML = message;
+    box.classList.remove('d-none');
+}
+
+async function pollCampGlaucomaLatest() {
+    const deviceId = getCampDeviceId();
+    try {
+        const resp = await fetch(`${API_BASE}/glaucoma/device/latest?device_id=${encodeURIComponent(deviceId)}`);
+        const data = await resp.json();
+        if (!data.success || !data.result) {
+            return;
+        }
+        const r = data.result;
+        if (r.id && String(r.id) === String(campLastGlaucomaResultId)) {
+            return;
+        }
+        campLastGlaucomaResultId = r.id;
+
+        // Fill UI
+        document.getElementById('campOmdi').textContent = Number(r.omdi ?? 0).toFixed(3);
+        document.getElementById('campPeak').textContent = Number(r.peak_mm ?? 0).toFixed(3);
+        document.getElementById('campLatency').textContent = String(Math.round(Number(r.recovery_latency_ms ?? 0)));
+        document.getElementById('campVariance').textContent = Number(r.variance ?? 0).toFixed(4);
+        document.getElementById('campRisk').textContent = String(r.risk_level || '--');
+        document.getElementById('campGlaucomaTs').textContent = r.timestamp ? new Date(r.timestamp).toLocaleString() : new Date().toLocaleString();
+
+        screeningResults.glaucoma = r;
+        document.getElementById('glaucomaSubmit').disabled = false;
+
+        const risk = String(r.risk_level || '').toUpperCase();
+        const level = risk.includes('HIGH') ? 'danger' : (risk.includes('MOD') ? 'warning' : 'success');
+        showCampGlaucomaStatus(`Latest device result received: <strong>${risk || '--'}</strong>`, level);
+
+        // Auto-continue to cataract after countdown (camp flow)
+        startCampCountdown({
+            seconds: 10,
+            messageElId: 'glaucomaResult',
+            nextStep: 3,
+            nextLabel: 'Cataract'
+        });
+    } catch (e) {
+        // ignore transient errors
+    }
+}
+
+function startCampGlaucomaPolling() {
+    if (campGlaucomaPollTimer) {
+        clearInterval(campGlaucomaPollTimer);
+    }
+    pollCampGlaucomaLatest();
+    campGlaucomaPollTimer = setInterval(pollCampGlaucomaLatest, 3000);
 }
 
 async function handleGlaucomaSubmit() {
-    const iopValue = parseFloat(document.getElementById('iopValue').value);
-    const eye = document.getElementById('glaucomaEye').value;
-    
-    if (!iopValue) {
-        alert('Please enter IOP value');
+    if (!screeningResults.glaucoma) {
+        alert('No device glaucoma result yet. Bind device and press the hardware button.');
         return;
     }
     
@@ -198,27 +337,18 @@ async function handleGlaucomaSubmit() {
     submitBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Saving...';
     
     try {
-        const response = await fetch(`${API_BASE}/glaucoma/measure`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                patient_id: currentPatientId,
-                iop_proxy: iopValue,
-                eye: eye
-            })
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            screeningResults.glaucoma = data.analysis;
-            goToStep(3);
-        } else {
-            alert('Failed to save glaucoma results: ' + data.message);
+        // Result is already stored in backend by device ingestion.
+        // Proceed to next step.
+        if (campGlaucomaPollTimer) {
+            clearInterval(campGlaucomaPollTimer);
+            campGlaucomaPollTimer = null;
         }
-    } catch (error) {
-        console.error('Error:', error);
-        alert('Connection error');
+        startCampCountdown({
+            seconds: 10,
+            messageElId: 'glaucomaResult',
+            nextStep: 3,
+            nextLabel: 'Cataract'
+        });
     } finally {
         submitBtn.disabled = false;
         submitBtn.innerHTML = originalText;
@@ -283,8 +413,13 @@ async function handleCataractSubmit() {
             resultDiv.className = `alert ${isRisk ? 'alert-warning' : 'alert-success'}`;
             resultDiv.innerHTML = `<strong>${data.analysis.label}</strong> - Confidence: ${data.analysis.confidence.toFixed(1)}%`;
             resultDiv.classList.remove('d-none');
-            
-            setTimeout(() => goToStep(4), 1500);
+
+            startCampCountdown({
+                seconds: 10,
+                messageElId: 'cataractResult',
+                nextStep: 4,
+                nextLabel: 'Dry Eye'
+            });
         } else {
             alert('Failed to analyze image: ' + data.message);
             submitBtn.disabled = false;
@@ -348,8 +483,13 @@ async function handleDryeyeSubmit() {
             resultDiv.className = `alert ${isRisk ? 'alert-warning' : 'alert-success'}`;
             resultDiv.innerHTML = `<strong>${data.analysis.label}</strong> - Blink Rate: ${data.analysis.blink_rate_bpm.toFixed(1)} BPM`;
             resultDiv.classList.remove('d-none');
-            
-            setTimeout(() => goToStep(5), 1500);
+
+            startCampCountdown({
+                seconds: 10,
+                messageElId: 'dryeyeResult',
+                nextStep: 5,
+                nextLabel: 'Final Report'
+            });
         } else {
             alert('Failed to analyze video: ' + data.message);
             submitBtn.disabled = false;

@@ -27,6 +27,9 @@
                         <a class="nav-link active" href="index.html"><i class="bi bi-house-door me-1"></i>Home</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="glaucoma.html"><i class="bi bi-activity me-1"></i>Glaucoma</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link" href="cataract.html"><i class="bi bi-camera me-1"></i>Cataract</a>
                     </li>
                     <li class="nav-item">
@@ -343,8 +346,34 @@
                 <p class="text-muted">Choose a screening test to begin</p>
             </div>
             <div class="row g-4">
+                <!-- Glaucoma Module -->
+                <div class="col-lg-4 col-md-6">
+                    <div class="card module-card h-100 border-0 shadow hover-lift">
+                        <div class="card-body text-center p-4">
+                            <div class="module-icon bg-danger text-white mb-3">
+                                <i class="bi bi-activity"></i>
+                            </div>
+                            <h4 class="card-title fw-bold">Glaucoma Screening</h4>
+                            <p class="card-text text-muted">
+                                Hardware-assisted ocular response screening (VL53L1X) with OMDI-based risk level.
+                            </p>
+                            <ul class="list-unstyled small text-start mb-4">
+                                <li><i class="bi bi-check-circle-fill text-success me-2"></i>ESP32 + ToF sensor</li>
+                                <li><i class="bi bi-check-circle-fill text-success me-2"></i>OMDI + peak/latency/variance</li>
+                                <li><i class="bi bi-check-circle-fill text-success me-2"></i>Auto-refresh latest reading</li>
+                            </ul>
+                            <a href="glaucoma.html" class="btn btn-danger btn-lg w-100">
+                                <i class="bi bi-cpu me-1"></i>Open Glaucoma
+                            </a>
+                        </div>
+                        <div class="card-footer bg-danger text-white text-center small">
+                            <i class="bi bi-lightning-fill me-1"></i>Step 1 of 3
+                        </div>
+                    </div>
+                </div>
+
                 <!-- Cataract Module -->
-                <div class="col-md-6">
+                <div class="col-lg-4 col-md-6">
                     <div class="card module-card h-100 border-0 shadow hover-lift">
                         <div class="card-body text-center p-4">
                             <div class="module-icon bg-warning text-dark mb-3">
@@ -364,12 +393,12 @@
                             </a>
                         </div>
                         <div class="card-footer bg-warning text-dark text-center small">
-                            <i class="bi bi-lightning-fill me-1"></i>Step 1 of 2
+                            <i class="bi bi-lightning-fill me-1"></i>Step 2 of 3
                         </div>
                     </div>
                 </div>
                 <!-- Dry Eye Module -->
-                <div class="col-md-6">
+                <div class="col-lg-4 col-md-6">
                     <div class="card module-card h-100 border-0 shadow hover-lift">
                         <div class="card-body text-center p-4">
                             <div class="module-icon bg-info text-white mb-3">
@@ -389,7 +418,7 @@
                             </a>
                         </div>
                         <div class="card-footer bg-info text-white text-center small">
-                            <i class="bi bi-lightning-fill me-1"></i>Step 2 of 2
+                            <i class="bi bi-lightning-fill me-1"></i>Step 3 of 3
                         </div>
                     </div>
                 </div>

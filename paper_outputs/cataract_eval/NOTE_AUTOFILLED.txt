@@ -1,0 +1,9 @@
+IMPORTANT NOTE (for demo only)
+
+The file ground_truth_labels.csv was auto-filled from the model's own predictions in backend/catract/cataract_dl_log.csv.
+
+This will make Table I and Fig. 9 look very strong (often perfect), but it is NOT a valid evaluation because it does not use real clinician / dataset ground truth labels.
+
+To produce real results for a paper/thesis:
+- Replace ground_truth_labels.csv true_label values with actual ground truth labels for each image.
+- Then re-run generate_table_I_and_fig9.py.

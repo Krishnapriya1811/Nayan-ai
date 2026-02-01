@@ -24,6 +24,84 @@ document.addEventListener('DOMContentLoaded', function() {
     const printBtn = document.getElementById('printBtn');
     const downloadBtn = document.getElementById('downloadBtn');
 
+    // ESP32 Dry Eye
+    const esp32DeviceIdDryeye = document.getElementById('esp32DeviceIdDryeye');
+    const esp32SecondsDryeye = document.getElementById('esp32SecondsDryeye');
+    const esp32PreviewBtnDryeye = document.getElementById('esp32PreviewBtnDryeye');
+    const esp32AnalyzeBtnDryeye = document.getElementById('esp32AnalyzeBtnDryeye');
+    const esp32StatusDryeye = document.getElementById('esp32StatusDryeye');
+    const esp32PreviewContainerDryeye = document.getElementById('esp32PreviewContainerDryeye');
+    const esp32PreviewImgDryeye = document.getElementById('esp32PreviewImgDryeye');
+
+    const esp32LiveStartBtnDryeye = document.getElementById('esp32LiveStartBtnDryeye');
+    const esp32LiveStopBtnDryeye = document.getElementById('esp32LiveStopBtnDryeye');
+    const esp32LiveContainerDryeye = document.getElementById('esp32LiveContainerDryeye');
+    const esp32LiveImgDryeye = document.getElementById('esp32LiveImgDryeye');
+    const esp32RecordBtnDryeye = document.getElementById('esp32RecordBtnDryeye');
+    const esp32CaptureStatusDryeye = document.getElementById('esp32CaptureStatusDryeye');
+
+    const esp32ClipContainerDryeye = document.getElementById('esp32ClipContainerDryeye');
+    const esp32ClipVideoDryeye = document.getElementById('esp32ClipVideoDryeye');
+    const esp32ClipStatusDryeye = document.getElementById('esp32ClipStatusDryeye');
+
+    // Analyze should use the same clip created in Step 3 (if available).
+    let esp32LastRecordedClipUrl = null;
+    let hwSinceId = 0;
+    let hwInProgress = false;
+
+    let autoNextTimer = null;
+
+    function startAutoNextCountdown(nextUrl, nextLabel, seconds = 10) {
+        if (!nextUrl) return;
+        if (autoNextTimer) {
+            clearInterval(autoNextTimer);
+            autoNextTimer = null;
+        }
+
+        const resultsCardEl = document.getElementById('resultsCard');
+        const body = resultsCardEl ? resultsCardEl.querySelector('.card-body') : null;
+        if (!body) return;
+
+        let box = document.getElementById('autoNextBox');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'autoNextBox';
+            box.className = 'alert alert-primary mt-3 mb-0';
+            body.appendChild(box);
+        }
+
+        let remaining = Number(seconds);
+        const render = () => {
+            box.innerHTML = `Next: <strong>${nextLabel}</strong> in <strong>${remaining}s</strong>. ` +
+                `<a href="${nextUrl}" class="alert-link">Go now</a> ` +
+                `<button type="button" class="btn btn-sm btn-outline-primary ms-2" id="autoNextCancelBtn">Cancel</button>`;
+
+            const cancelBtn = document.getElementById('autoNextCancelBtn');
+            if (cancelBtn) {
+                cancelBtn.onclick = () => {
+                    if (autoNextTimer) {
+                        clearInterval(autoNextTimer);
+                        autoNextTimer = null;
+                    }
+                    box.className = 'alert alert-secondary mt-3 mb-0';
+                    box.innerHTML = `Auto-next cancelled. <a href="${nextUrl}" class="alert-link">Go to ${nextLabel}</a>`;
+                };
+            }
+        };
+
+        render();
+        autoNextTimer = setInterval(() => {
+            remaining -= 1;
+            if (remaining <= 0) {
+                clearInterval(autoNextTimer);
+                autoNextTimer = null;
+                window.location.href = nextUrl;
+                return;
+            }
+            render();
+        }, 1000);
+    }
+
     // File input change handler
     if (videoInput) {
         videoInput.addEventListener('change', function(e) {
@@ -98,6 +176,248 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     }
 
+    function setEsp32DryeyeStatus(message, isError) {
+        if (!esp32StatusDryeye) return;
+        esp32StatusDryeye.textContent = `Status: ${message}`;
+        esp32StatusDryeye.className = isError ? 'small text-danger' : 'small text-muted';
+    }
+
+    function setEsp32DryeyeCaptureStatus(message, isError) {
+        if (!esp32CaptureStatusDryeye) return;
+        esp32CaptureStatusDryeye.style.display = 'block';
+        esp32CaptureStatusDryeye.textContent = message;
+        esp32CaptureStatusDryeye.className = isError ? 'small text-danger mt-2' : 'small text-muted mt-2';
+    }
+
+    function setEsp32ClipStatus(message, isError) {
+        if (!esp32ClipStatusDryeye) return;
+        esp32ClipStatusDryeye.textContent = message;
+        esp32ClipStatusDryeye.className = isError ? 'small text-danger' : 'small text-muted';
+    }
+
+    function getDeviceIdDryeye() {
+        const v = (esp32DeviceIdDryeye && esp32DeviceIdDryeye.value) ? esp32DeviceIdDryeye.value.trim() : '';
+        return v || 'esp32cam1';
+    }
+
+    function startEsp32LiveDryeye() {
+        const deviceId = getDeviceIdDryeye();
+        if (esp32LiveContainerDryeye) esp32LiveContainerDryeye.style.display = 'block';
+        if (esp32LiveImgDryeye) {
+            const cb = `cb=${Date.now()}`;
+            esp32LiveImgDryeye.src = `${API_BASE}/camera/esp32/mjpeg?device_id=${encodeURIComponent(deviceId)}&${cb}`;
+        }
+        if (esp32LiveStartBtnDryeye) esp32LiveStartBtnDryeye.disabled = true;
+        if (esp32LiveStopBtnDryeye) esp32LiveStopBtnDryeye.disabled = false;
+        setEsp32DryeyeStatus('Live preview running', false);
+    }
+
+    function stopEsp32LiveDryeye() {
+        if (esp32LiveImgDryeye) esp32LiveImgDryeye.src = '';
+        if (esp32LiveContainerDryeye) esp32LiveContainerDryeye.style.display = 'none';
+        if (esp32LiveStartBtnDryeye) esp32LiveStartBtnDryeye.disabled = false;
+        if (esp32LiveStopBtnDryeye) esp32LiveStopBtnDryeye.disabled = true;
+        setEsp32DryeyeStatus('Live preview stopped', false);
+    }
+
+    async function recordEsp32Mp4Dryeye() {
+        const deviceId = getDeviceIdDryeye();
+        const sec = Number(esp32SecondsDryeye && esp32SecondsDryeye.value ? esp32SecondsDryeye.value : 30);
+        const secClamped = Number.isFinite(sec) ? Math.max(10, Math.min(60, sec)) : 30;
+
+        if (esp32RecordBtnDryeye) esp32RecordBtnDryeye.disabled = true;
+        if (esp32AnalyzeBtnDryeye) esp32AnalyzeBtnDryeye.disabled = true;
+        // Ensure live preview is running so the user understands it's collecting frames.
+        if (esp32LiveImgDryeye && !esp32LiveImgDryeye.src) {
+            startEsp32LiveDryeye();
+        }
+
+        // Countdown (collect frames)
+        let remaining = secClamped;
+        setEsp32DryeyeCaptureStatus(`Recording... ${remaining}s remaining`, false);
+        if (esp32ClipContainerDryeye) esp32ClipContainerDryeye.style.display = 'block';
+        setEsp32ClipStatus('Waiting for frames...', false);
+
+        await new Promise(resolve => {
+            const t = setInterval(() => {
+                remaining -= 1;
+                if (remaining <= 0) {
+                    clearInterval(t);
+                    setEsp32DryeyeCaptureStatus('Recording finished. Building clip...', false);
+                    setEsp32ClipStatus('Building...', false);
+                    resolve();
+                    return;
+                }
+                setEsp32DryeyeCaptureStatus(`Recording... ${remaining}s remaining`, false);
+            }, 1000);
+        });
+
+        try {
+            const resp = await fetch(`${API_BASE}/camera/esp32/record`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ device_id: deviceId, seconds: secClamped })
+            });
+            const data = await resp.json();
+            if (!data || !data.success) {
+                throw new Error(data && data.message ? data.message : 'Record failed');
+            }
+
+            const cb = `cb=${Date.now()}`;
+            if (esp32ClipVideoDryeye) {
+                const clipUrl = `${data.video_url}${data.video_url.includes('?') ? '&' : '?'}${cb}`; 
+                esp32LastRecordedClipUrl = data.video_url; // store non-cachebusted server path
+                const clipType = data.content_type || (clipUrl.toLowerCase().includes('.webm') ? 'video/webm' : 'video/mp4');
+
+                // Use <source> for better codec/type detection.
+                try {
+                    esp32ClipVideoDryeye.pause();
+                } catch (e) {}
+                esp32ClipVideoDryeye.removeAttribute('src');
+                while (esp32ClipVideoDryeye.firstChild) {
+                    esp32ClipVideoDryeye.removeChild(esp32ClipVideoDryeye.firstChild);
+                }
+                const source = document.createElement('source');
+                source.src = clipUrl;
+                source.type = clipType;
+                esp32ClipVideoDryeye.appendChild(source);
+                esp32ClipVideoDryeye.load();
+            }
+            setEsp32ClipStatus('Clip ready', false);
+            setEsp32DryeyeCaptureStatus(`Clip created (${data.frames_used || 'many'} frames, ${data.fps || '--'} fps). Now click Analyze.`, false);
+            if (esp32AnalyzeBtnDryeye) esp32AnalyzeBtnDryeye.disabled = false;
+        } catch (e) {
+            console.error(e);
+            setEsp32ClipStatus('Clip failed', true);
+            setEsp32DryeyeCaptureStatus(e.message || 'Clip failed', true);
+        } finally {
+            if (esp32RecordBtnDryeye) esp32RecordBtnDryeye.disabled = false;
+        }
+    }
+
+    async function handleHardwareDryeyeEvent() {
+        if (hwInProgress) return;
+        hwInProgress = true;
+        try {
+            // Record using current UI seconds value, then analyze immediately for the active patient.
+            await recordEsp32Mp4Dryeye();
+
+            const deviceId = getDeviceIdDryeye();
+            const sec = Number(esp32SecondsDryeye && esp32SecondsDryeye.value ? esp32SecondsDryeye.value : 30);
+            const secClamped = Number.isFinite(sec) ? Math.max(10, Math.min(60, sec)) : 30;
+            await analyzeEsp32Dryeye(deviceId, secClamped);
+        } catch (e) {
+            // errors already surfaced in UI
+        } finally {
+            setTimeout(() => { hwInProgress = false; }, 1500);
+        }
+    }
+
+    function pollHardwareEvents() {
+        const deviceId = getDeviceIdDryeye();
+        const url = `${API_BASE}/hardware/poll?device_id=${encodeURIComponent(deviceId)}&since_id=${encodeURIComponent(hwSinceId)}`;
+        fetch(url)
+            .then(r => r.json())
+            .then(data => {
+                if (!data || !data.success || !data.event) return;
+                const idNum = Number(data.id);
+                if (Number.isFinite(idNum) && idNum > hwSinceId) hwSinceId = idNum;
+
+                if (String(data.event).toUpperCase() !== 'DRYEYE') return;
+                handleHardwareDryeyeEvent();
+            })
+            .catch(() => {
+                // best-effort polling
+            });
+    }
+
+    // Poll hardware events so ESP32-WROOM can trigger actions over Wi-Fi
+    setInterval(pollHardwareEvents, 1000);
+
+    async function previewLatestEsp32DryeyeFrame(deviceId) {
+        if (!deviceId) {
+            setEsp32DryeyeStatus('Device ID required', true);
+            return;
+        }
+
+        if (esp32PreviewBtnDryeye) esp32PreviewBtnDryeye.disabled = true;
+        if (esp32AnalyzeBtnDryeye) esp32AnalyzeBtnDryeye.disabled = true;
+        setEsp32DryeyeStatus('Fetching latest frame...', false);
+
+        try {
+            const url = `${API_BASE}/camera/esp32/latest?device_id=${encodeURIComponent(deviceId)}`;
+            const resp = await fetch(url);
+            const data = await resp.json();
+            if (!data || !data.success) {
+                throw new Error(data && data.message ? data.message : 'No latest frame');
+            }
+
+            if (esp32PreviewContainerDryeye) esp32PreviewContainerDryeye.style.display = 'block';
+            if (esp32PreviewImgDryeye) {
+                const cacheBust = `cb=${Date.now()}`;
+                esp32PreviewImgDryeye.src = `${data.latest_url}${data.latest_url.includes('?') ? '&' : '?'}${cacheBust}`;
+            }
+
+            setEsp32DryeyeStatus(`Preview ready (ts=${data.timestamp_ms})`, false);
+            if (esp32AnalyzeBtnDryeye) esp32AnalyzeBtnDryeye.disabled = false;
+        } catch (e) {
+            console.error(e);
+            setEsp32DryeyeStatus(e.message || 'Preview failed', true);
+        } finally {
+            if (esp32PreviewBtnDryeye) esp32PreviewBtnDryeye.disabled = false;
+        }
+    }
+
+    async function analyzeEsp32Dryeye(deviceId, seconds) {
+        if (!deviceId) {
+            setEsp32DryeyeStatus('Device ID required', true);
+            return;
+        }
+
+        const sec = Number(seconds);
+        const secClamped = Number.isFinite(sec) ? Math.max(10, Math.min(60, sec)) : 30;
+
+        if (esp32PreviewBtnDryeye) esp32PreviewBtnDryeye.disabled = true;
+        if (esp32AnalyzeBtnDryeye) esp32AnalyzeBtnDryeye.disabled = true;
+
+        // Show loading spinner
+        if (loadingSpinner) loadingSpinner.style.display = 'block';
+        if (resultsCard) resultsCard.style.display = 'none';
+        if (nextBtn) nextBtn.style.display = 'none';
+        setEsp32DryeyeStatus(`Analyzing last ${secClamped}s...`, false);
+
+        try {
+            // If a clip was created in Step 3, analyze THAT exact clip (same as download+upload flow).
+            const endpoint = esp32LastRecordedClipUrl ? `${API_BASE}/camera/esp32/dryeye/analyze_clip` : `${API_BASE}/camera/esp32/dryeye/latest`;
+            const body = esp32LastRecordedClipUrl
+                ? { patient_id: patientId, clip_url: esp32LastRecordedClipUrl }
+                : { patient_id: patientId, device_id: deviceId, seconds: secClamped };
+
+            const resp = await fetch(endpoint, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(body)
+            });
+            const data = await resp.json();
+
+            if (!data || !data.success) {
+                throw new Error(data && data.message ? data.message : 'Dry-eye analysis failed');
+            }
+
+            displayResults(data.analysis);
+            setEsp32DryeyeStatus('Analysis complete', false);
+        } catch (e) {
+            console.error(e);
+            alert('Dry eye analysis failed: ' + (e.message || 'Unknown error'));
+            setEsp32DryeyeStatus(e.message || 'Analysis failed', true);
+        } finally {
+            if (loadingSpinner) loadingSpinner.style.display = 'none';
+            if (esp32PreviewBtnDryeye) esp32PreviewBtnDryeye.disabled = false;
+            // Re-enable analyze after preview exists (simple approach: allow retry)
+            if (esp32AnalyzeBtnDryeye) esp32AnalyzeBtnDryeye.disabled = false;
+        }
+    }
+
     function displayResults(data) {
         const riskLabel = document.getElementById('riskLabel');
         const riskAlert = document.getElementById('riskAlert');
@@ -106,12 +426,15 @@ document.addEventListener('DOMContentLoaded', function() {
         const meanIbi = document.getElementById('meanIbi');
         const maxEyeOpen = document.getElementById('maxEyeOpen');
         const timestamp = document.getElementById('timestamp');
+        const interpretation = document.getElementById('interpretation');
 
         // Update risk label and color
         if (riskLabel) riskLabel.textContent = data.label;
         if (riskAlert) {
             if (data.label === 'Dry Eye Risk') {
                 riskAlert.className = 'alert alert-warning mb-4';
+            } else if (data.label === 'Insufficient Data') {
+                riskAlert.className = 'alert alert-secondary mb-4';
             } else {
                 riskAlert.className = 'alert alert-success mb-4';
             }
@@ -124,6 +447,11 @@ document.addEventListener('DOMContentLoaded', function() {
         if (maxEyeOpen) maxEyeOpen.textContent = data.max_eye_open_sec + 's';
         if (timestamp) timestamp.textContent = new Date().toLocaleString();
 
+        // Show any backend note (helps user fix capture quality)
+        if (interpretation && data.note) {
+            interpretation.innerHTML = `<small><strong>Note:</strong> ${data.note}</small>`;
+        }
+
         // Store test results in session
         sessionStorage.setItem('dryEyeResults', JSON.stringify(data));
 
@@ -134,6 +462,9 @@ document.addEventListener('DOMContentLoaded', function() {
         if (resultsCard) resultsCard.style.display = 'block';
         if (nextBtn) nextBtn.style.display = 'block';
         if (resultsCard) resultsCard.scrollIntoView({ behavior: 'smooth' });
+
+        // Auto-advance to report after 10 seconds
+        startAutoNextCountdown('report.html', 'Full Report', 10);
     }
 
     function updatePrintTemplate(data) {
@@ -250,5 +581,40 @@ document.addEventListener('DOMContentLoaded', function() {
                     downloadBtn.disabled = false;
                 });
         });
+    }
+
+    // ESP32 Dry Eye handlers
+    if (esp32PreviewBtnDryeye) {
+        esp32PreviewBtnDryeye.addEventListener('click', function() {
+            const deviceId = (esp32DeviceIdDryeye && esp32DeviceIdDryeye.value) ? esp32DeviceIdDryeye.value.trim() : 'esp32cam1';
+            previewLatestEsp32DryeyeFrame(deviceId);
+        });
+    }
+
+    if (esp32AnalyzeBtnDryeye) {
+        esp32AnalyzeBtnDryeye.addEventListener('click', function() {
+            const deviceId = (esp32DeviceIdDryeye && esp32DeviceIdDryeye.value) ? esp32DeviceIdDryeye.value.trim() : 'esp32cam1';
+            const seconds = (esp32SecondsDryeye && esp32SecondsDryeye.value) ? esp32SecondsDryeye.value : 30;
+            analyzeEsp32Dryeye(deviceId, seconds);
+        });
+    }
+
+    if (esp32LiveStartBtnDryeye) {
+        esp32LiveStartBtnDryeye.addEventListener('click', startEsp32LiveDryeye);
+    }
+    if (esp32LiveStopBtnDryeye) {
+        esp32LiveStopBtnDryeye.addEventListener('click', stopEsp32LiveDryeye);
+    }
+    if (esp32RecordBtnDryeye) {
+        esp32RecordBtnDryeye.addEventListener('click', recordEsp32Mp4Dryeye);
+    }
+
+    // Auto-start live preview when entering the page
+    try {
+        if (esp32LiveStartBtnDryeye && esp32LiveImgDryeye) {
+            startEsp32LiveDryeye();
+        }
+    } catch (e) {
+        // non-fatal
     }
 });

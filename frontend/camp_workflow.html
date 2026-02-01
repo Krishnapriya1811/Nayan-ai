@@ -176,32 +176,44 @@
                 <div class="workflow-step" id="step2" style="display: none;">
                     <h4 class="mb-3">
                         <span class="step-number bg-info text-white">2</span>
-                        Glaucoma Screening (IOP Measurement)
+                        Glaucoma Screening (Device OMDI)
                     </h4>
                     <div class="alert alert-info">
                         <i class="bi bi-info-circle me-2"></i>
-                        <strong>Instructions:</strong> Use the tonometer or enter manual IOP reading
+                        <strong>Instructions:</strong> Bind the device to this patient, then press the <strong>Glaucoma</strong> button on the hardware.
                     </div>
-                    <div class="row">
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold">IOP Reading (mmHg) *</label>
-                            <input type="number" class="form-control form-control-lg" id="iopValue" step="0.1" min="5" max="40" placeholder="Enter IOP value" required>
+                    <div class="row g-3">
+                        <div class="col-md-6">
+                            <label class="form-label fw-bold">Device ID</label>
+                            <input type="text" class="form-control form-control-lg" id="campGlaucomaDeviceId" value="esp32cam1" placeholder="esp32cam1">
+                            <div class="form-text">Must match the ESP32-CAM device_id.</div>
                         </div>
-                        <div class="col-md-6 mb-3">
-                            <label class="form-label fw-bold">Eye *</label>
-                            <select class="form-select form-select-lg" id="glaucomaEye">
-                                <option value="Both">Both Eyes</option>
-                                <option value="Left">Left Eye</option>
-                                <option value="Right">Right Eye</option>
-                            </select>
+                        <div class="col-md-6 d-flex align-items-end">
+                            <button class="btn btn-outline-primary btn-lg w-100" id="campBindDeviceBtn" type="button">
+                                <i class="bi bi-link-45deg me-1"></i>Bind Device
+                            </button>
                         </div>
                     </div>
-                    <div id="glaucomaResult" class="alert d-none"></div>
+
+                    <div id="glaucomaResult" class="alert mt-3 d-none"></div>
+
+                    <div class="table-responsive mt-3">
+                        <table class="table table-bordered mb-0">
+                            <tbody>
+                                <tr><th class="bg-light" style="width:40%">OMDI</th><td id="campOmdi">--</td></tr>
+                                <tr><th class="bg-light">Peak (mm)</th><td id="campPeak">--</td></tr>
+                                <tr><th class="bg-light">Recovery Latency (ms)</th><td id="campLatency">--</td></tr>
+                                <tr><th class="bg-light">Variance</th><td id="campVariance">--</td></tr>
+                                <tr><th class="bg-light">Risk</th><td id="campRisk">--</td></tr>
+                                <tr><th class="bg-light">Timestamp</th><td id="campGlaucomaTs">--</td></tr>
+                            </tbody>
+                        </table>
+                    </div>
                     <div class="text-end">
                         <button class="btn btn-outline-secondary me-2" onclick="goToStep(1)">
                             <i class="bi bi-arrow-left me-1"></i>Back
                         </button>
-                        <button class="btn btn-primary btn-lg" id="glaucomaSubmit">
+                        <button class="btn btn-primary btn-lg" id="glaucomaSubmit" disabled>
                             Save & Continue to Cataract <i class="bi bi-arrow-right ms-2"></i>
                         </button>
                     </div>

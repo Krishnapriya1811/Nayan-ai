@@ -13,8 +13,22 @@
             .print-only { display: block !important; }
             body { background: white !important; }
             .card { border: 1px solid #dee2e6 !important; box-shadow: none !important; }
+
+            /* Receipt-style print */
+            @page { size: 80mm auto; margin: 6mm; }
+            .report-main { display: none !important; }
+            .receipt-print { display: block !important; }
+            .receipt { width: 68mm; margin: 0 auto; font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace; color: #000; }
+            .receipt .muted { color: #000; opacity: 0.85; }
+            .receipt .line { border-top: 1px dashed #000; margin: 8px 0; }
+            .receipt h1, .receipt h2, .receipt h3 { margin: 0; }
+            .receipt .center { text-align: center; }
+            .receipt .row { display: flex; justify-content: space-between; gap: 8px; }
+            .receipt .row div { white-space: nowrap; }
+            .receipt .wrap { white-space: normal; }
         }
         .print-only { display: none; }
+        .receipt-print { display: none; }
         .report-header { background: linear-gradient(135deg, #0066cc 0%, #0052a3 100%); color: white; padding: 30px; }
         .metric-card { border-left: 4px solid #0066cc; }
         .risk-badge { font-size: 1.1rem; padding: 8px 16px; }
@@ -51,13 +65,46 @@
         </div>
     </nav>
 
+    <!-- Receipt Print (Print Only) -->
+    <div class="receipt-print print-only">
+        <div class="receipt">
+            <div class="center">
+                <h2>NAYAN-AI</h2>
+                <div class="muted">Eye Screening Receipt</div>
+            </div>
+            <div class="line"></div>
+
+            <div class="row"><div>Patient</div><div id="receiptPatientName">--</div></div>
+            <div class="row"><div>Age</div><div id="receiptPatientAge">--</div></div>
+            <div class="row"><div>Gender</div><div id="receiptPatientGender">--</div></div>
+            <div class="row"><div>Patient ID</div><div id="receiptPatientId">--</div></div>
+            <div class="row"><div>Printed</div><div id="receiptPrintedAt">--</div></div>
+            <div class="line"></div>
+
+            <div class="center"><strong>SUMMARY</strong></div>
+            <div class="line"></div>
+            <div class="row"><div>Cataract</div><div id="receiptCataract">--</div></div>
+            <div class="row"><div>Dry Eye</div><div id="receiptDryEye">--</div></div>
+            <div class="row"><div>Glaucoma</div><div id="receiptGlaucoma">--</div></div>
+            <div class="line"></div>
+
+            <div class="wrap muted">
+                <strong>Disclaimer:</strong> This is a screening support report only. Not a medical diagnosis.
+                Please consult an ophthalmologist for confirmation.
+            </div>
+            <div class="line"></div>
+
+            <div class="center muted">Thank you</div>
+        </div>
+    </div>
+
     <!-- Report Content -->
-    <div class="container py-5">
+    <div class="container py-5 report-main">
         <!-- Action Buttons -->
         <div class="row mb-4 no-print">
             <div class="col-12">
                 <button class="btn btn-primary me-2" onclick="window.print()">
-                    <i class="bi bi-printer me-2"></i>Print Report
+                    <i class="bi bi-printer me-2"></i>Print (Receipt)
                 </button>
                 <button class="btn btn-success me-2" id="downloadPdfBtn">
                     <i class="bi bi-file-earmark-pdf me-2"></i>Download PDF
@@ -78,6 +125,13 @@
                 <p class="mb-0">NAYAN-AI - AI-Assisted Eye Screening System</p>
             </div>
             <div class="card-body">
+                <!-- Hospital-style disclaimer -->
+                <div class="alert alert-warning mb-4">
+                    <strong><i class="bi bi-exclamation-triangle-fill me-2"></i>Screening Only:</strong>
+                    This report is generated for screening support and is <strong>not</strong> a medical diagnosis.
+                    Please consult a qualified ophthalmologist for confirmation.
+                </div>
+
                 <!-- Patient Information -->
                 <div class="row mb-4">
                     <div class="col-md-6">

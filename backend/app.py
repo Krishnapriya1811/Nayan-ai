@@ -14,13 +14,15 @@ import csv
 import sys
 from datetime import datetime
 from pathlib import Path
-from flask import Flask, request, jsonify, send_from_directory, render_template_string, redirect, send_file, abort
+from collections import deque
+from flask import Flask, request, jsonify, send_from_directory, render_template_string, redirect, send_file, abort, Response, stream_with_context
 from flask_cors import CORS
 from flask_socketio import SocketIO, emit, join_room, leave_room
 from werkzeug.utils import secure_filename
 from werkzeug.security import generate_password_hash, check_password_hash
 import sqlite3
 from threading import Lock
+from typing import Optional, Tuple
 
 # ============== APP SETUP ==============
 BASE_DIR = Path(__file__).resolve().parent
@@ -146,6 +148,1183 @@ def predict_cataract_dl(image_path: str):
 
     probs_map = {str(_CATARACT_CLASS_NAMES[i]): float(probs[i]) for i in range(len(_CATARACT_CLASS_NAMES))}
     return pred_label, conf_percent, probs_map
+
+
+# ============== DEVICE (ESP32-CAM) INGESTION ==============
+def _get_required_device_token() -> Optional[str]:
+    """Optional shared secret for device uploads.
+
+    If env var ESP32_DEVICE_TOKEN is set, device requests must provide the same
+    value via header `X-Device-Token` or query param `token`.
+    """
+    token = os.environ.get('ESP32_DEVICE_TOKEN')
+    return token.strip() if token and token.strip() else None
+
+
+def _check_device_token_or_reject():
+    required = _get_required_device_token()
+    if not required:
+        return None
+
+    provided = (
+        request.headers.get('X-Device-Token')
+        or request.args.get('token')
+        or request.form.get('token')
+    )
+    if not provided or provided != required:
+        return jsonify({'success': False, 'message': 'Unauthorized device'}), 401
+    return None
+
+
+def _coerce_patient_id(value) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        pid = int(str(value).strip())
+        return pid if pid > 0 else None
+    except Exception:
+        return None
+
+
+def _extract_image_bytes_from_request() -> Tuple[Optional[bytes], Optional[str], Optional[str]]:
+    """Extract image bytes from multipart, raw body, or JSON base64.
+
+    Returns: (bytes, ext_hint, error_message)
+    """
+    # 1) multipart/form-data with field `image`
+    if 'image' in request.files:
+        f = request.files['image']
+        if not f or not f.filename:
+            return None, None, 'No image selected'
+        filename = f.filename.lower()
+        ext_hint = None
+        for ext in ('.jpg', '.jpeg', '.png', '.webp'):
+            if filename.endswith(ext):
+                ext_hint = ext
+                break
+        return f.read(), ext_hint, None
+
+    # 2) application/json base64
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        frame = data.get('frame') or data.get('image_base64') or data.get('image')
+        if not frame:
+            return None, None, 'Missing base64 field (expected frame/image_base64/image)'
+
+        try:
+            frame_str = str(frame)
+            if ',' in frame_str and 'base64' in frame_str[:50].lower():
+                frame_str = frame_str.split(',', 1)[1]
+            return base64.b64decode(frame_str), '.jpg', None
+        except Exception:
+            return None, None, 'Invalid base64 payload'
+
+    # 3) raw bytes (Content-Type: image/jpeg)
+    raw = request.get_data(cache=False)
+    if raw:
+        ctype = (request.headers.get('Content-Type') or '').lower()
+        ext_hint = '.jpg' if 'jpeg' in ctype or 'jpg' in ctype else None
+        if 'png' in ctype:
+            ext_hint = '.png'
+        return raw, ext_hint, None
+
+    return None, None, 'No image provided'
+
+
+def _save_and_analyze_cataract_bytes(patient_id: int, image_bytes: bytes, source: str):
+    # Decode bytes to verify it is a real image
+    nparr = np.frombuffer(image_bytes, np.uint8)
+    frame = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+    if frame is None:
+        return jsonify({'success': False, 'message': 'Failed to decode image bytes'}), 400
+
+    cataract_dir = PROJECT_DIR / 'uploads' / 'cataract'
+    os.makedirs(cataract_dir, exist_ok=True)
+
+    filename = secure_filename(f"cataract_{source}_{patient_id}_{int(time.time()*1000)}.jpg")
+    filepath = str(cataract_dir / filename)
+
+    ok = cv2.imwrite(filepath, frame)
+    if not ok or not os.path.exists(filepath):
+        return jsonify({'success': False, 'message': 'Failed to save image'}), 500
+
+    features = extract_cataract_features(filepath)
+    if not features:
+        return jsonify({'success': False, 'message': 'Failed to process image. Image may be corrupted.'}), 400
+
+    try:
+        pred_label, conf_percent, probs_map = predict_cataract_dl(filepath)
+        is_risk = pred_label.strip().lower() == 'cataract'
+        features['label'] = 'Possible Cataract Risk' if is_risk else 'Normal'
+        features['confidence'] = conf_percent
+        features['dl_pred_label'] = pred_label
+        features['dl_probs'] = probs_map
+    except Exception as dl_error:
+        return jsonify({
+            'success': False,
+            'message': f'Deep Learning model unavailable. Error: {str(dl_error)}'
+        }), 503
+
+    with db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''INSERT INTO cataract_results 
+                    (patient_id, image_file, contrast, sharpness, edge_strength, label, confidence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?)''',
+                 (patient_id, filename, features['contrast'], features['sharpness'],
+                  features['edge'], features['label'], features['confidence']))
+        conn.commit()
+        result_id = c.lastrowid
+        conn.close()
+
+    return jsonify({
+        'success': True,
+        'message': 'Cataract analysis complete',
+        'result_id': result_id,
+        'analysis': features,
+        'image_url': f'/uploads/cataract/{filename}'
+    }), 200
+
+
+_esp32_last_frame = {}
+_esp32_lock = Lock()
+_esp32_frame_buffer = {}  # device_id -> deque[(ts_ms:int, jpg_bytes:bytes)]
+
+# Hardware event channel (device -> web UI)
+_hw_event_lock = Lock()
+_hw_event_next_id = 1
+_hw_events = {}  # device_id -> {'id': int, 'event': str, 'ts_ms': int, 'payload': dict}
+
+# Keep enough frames for "record last N seconds". Default 90s.
+_ESP32_BUFFER_SECONDS = int(os.environ.get('ESP32_BUFFER_SECONDS', '90') or '90')
+_ESP32_MAX_FPS_ASSUME = float(os.environ.get('ESP32_MAX_FPS_ASSUME', '20') or '20')
+_ESP32_SAVE_ALL_FRAMES = str(os.environ.get('ESP32_SAVE_ALL_FRAMES', '0') or '0').strip().lower() in ('1', 'true', 'yes')
+
+
+def _coerce_device_id(value) -> str:
+    raw = str(value or 'esp32cam').strip()
+    # Keep it filesystem/url safe-ish
+    safe = ''.join(ch for ch in raw if ch.isalnum() or ch in ('-', '_'))
+    return safe[:64] if safe else 'esp32cam'
+
+
+@app.route('/api/hardware/event', methods=['POST'])
+def hardware_event_ingest():
+    """Ingest a button/event from a hardware device.
+
+    Body (JSON) or form:
+      - device_id (optional)
+      - event (required): CATARACT | DRYEYE | GLAUCOMA
+      - any extra fields allowed (stored as payload)
+    """
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    data = request.get_json(silent=True) if request.is_json else (request.form or {})
+    data = data or {}
+
+    device_id = _coerce_device_id(
+        data.get('device_id')
+        or request.args.get('device_id')
+        or request.headers.get('X-Device-Id')
+        or 'esp32cam1'
+    )
+
+    event = str(data.get('event') or data.get('type') or '').strip().upper()
+    if event not in ('CATARACT', 'DRYEYE', 'GLAUCOMA'):
+        return jsonify({'success': False, 'message': 'Invalid event (expected CATARACT|DRYEYE|GLAUCOMA)'}), 400
+
+    payload = dict(data)
+    payload.pop('event', None)
+    payload.pop('type', None)
+
+    global _hw_event_next_id
+    with _hw_event_lock:
+        eid = int(_hw_event_next_id)
+        _hw_event_next_id += 1
+        _hw_events[device_id] = {
+            'id': eid,
+            'event': event,
+            'ts_ms': int(time.time() * 1000),
+            'payload': payload,
+        }
+
+    return jsonify({'success': True, 'device_id': device_id, 'id': eid, 'event': event}), 200
+
+
+@app.route('/api/hardware/poll', methods=['GET'])
+def hardware_event_poll():
+    """Poll latest hardware event for a device.
+
+    Query:
+      - device_id (required)
+      - since_id (optional int): only return event if id > since_id
+    """
+    device_id = _coerce_device_id(request.args.get('device_id') or 'esp32cam1')
+    since_id = request.args.get('since_id') or '0'
+    try:
+        since_id = int(str(since_id).strip() or '0')
+    except Exception:
+        since_id = 0
+
+    with _hw_event_lock:
+        ev = _hw_events.get(device_id)
+
+    if not ev or int(ev.get('id') or 0) <= since_id:
+        return jsonify({'success': True, 'device_id': device_id, 'event': None}), 200
+
+    return jsonify({
+        'success': True,
+        'device_id': device_id,
+        'id': ev.get('id'),
+        'event': ev.get('event'),
+        'ts_ms': ev.get('ts_ms'),
+        'payload': ev.get('payload') or {},
+    }), 200
+
+
+@app.route('/api/camera/esp32/frame', methods=['POST'])
+def esp32_upload_frame():
+    """Upload a frame from ESP32-CAM (no patient required).
+
+    Recommended:
+      POST /api/camera/esp32/frame?device_id=esp32cam1
+      Content-Type: image/jpeg
+      Body: raw JPEG bytes
+    """
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    device_id = _coerce_device_id(
+        request.args.get('device_id')
+        or request.headers.get('X-Device-Id')
+        or request.form.get('device_id')
+    )
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        device_id = _coerce_device_id(data.get('device_id') or device_id)
+
+    image_bytes, _ext, err = _extract_image_bytes_from_request()
+    if err or not image_bytes:
+        return jsonify({'success': False, 'message': err or 'No image provided'}), 400
+    if len(image_bytes) > 8 * 1024 * 1024:
+        return jsonify({'success': False, 'message': 'Image too large (> 8MB)'}), 413
+
+    cam_dir = PROJECT_DIR / 'uploads' / 'camera'
+    os.makedirs(cam_dir, exist_ok=True)
+
+    ts_ms = int(time.time() * 1000)
+    latest_name = secure_filename(f"esp32_{device_id}_latest.jpg")
+    latest_path = str(cam_dir / latest_name)
+
+    # Persist only the "latest" file by default (much faster).
+    # Optionally keep saving all frames on disk for debugging.
+    saved_name = None
+    if _ESP32_SAVE_ALL_FRAMES:
+        saved_name = secure_filename(f"esp32_{device_id}_{ts_ms}.jpg")
+        saved_path = str(cam_dir / saved_name)
+        try:
+            with open(saved_path, 'wb') as f:
+                f.write(image_bytes)
+        except Exception:
+            saved_name = None
+
+    try:
+        with open(latest_path, 'wb') as f:
+            f.write(image_bytes)
+    except Exception:
+        return jsonify({'success': False, 'message': 'Failed to save latest frame'}), 500
+
+    jpeg_bytes = image_bytes
+
+    with _esp32_lock:
+        if device_id not in _esp32_frame_buffer:
+            _esp32_frame_buffer[device_id] = deque()
+        buf = _esp32_frame_buffer[device_id]
+        buf.append((ts_ms, jpeg_bytes))
+
+        # Trim buffer
+        max_len = int(max(50, _ESP32_BUFFER_SECONDS * _ESP32_MAX_FPS_ASSUME))
+        cutoff_ms = ts_ms - int(_ESP32_BUFFER_SECONDS * 1000)
+        while buf and (len(buf) > max_len or buf[0][0] < cutoff_ms):
+            buf.popleft()
+
+        _esp32_last_frame[device_id] = {
+            'saved_filename': saved_name,
+            'latest_filename': latest_name,
+            'timestamp_ms': ts_ms,
+            'ip': request.remote_addr,
+            'jpeg_bytes': jpeg_bytes,
+        }
+
+    # Performance: ESP32 can stream faster if we don't return a JSON body.
+    # Use: /api/camera/esp32/frame?...&quiet=1
+    quiet = (request.args.get('quiet') or '').strip().lower() in ('1', 'true', 'yes')
+    if quiet:
+        return ('', 204)
+
+    return jsonify({
+        'success': True,
+        'message': 'Frame received',
+        'device_id': device_id,
+        'timestamp_ms': ts_ms,
+        'saved_url': (f'/uploads/camera/{saved_name}' if saved_name else None),
+        'latest_url': f'/uploads/camera/{latest_name}',
+    }), 200
+
+
+@app.route('/api/camera/esp32/latest', methods=['GET'])
+def esp32_latest_frame_meta():
+    """Get metadata + URL for the latest ESP32 frame."""
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    device_id = _coerce_device_id(request.args.get('device_id') or 'esp32cam')
+
+    with _esp32_lock:
+        meta = _esp32_last_frame.get(device_id)
+
+    if not meta:
+        return jsonify({'success': False, 'message': 'No frame received yet', 'device_id': device_id}), 404
+
+    return jsonify({
+        'success': True,
+        'device_id': device_id,
+        'timestamp_ms': meta.get('timestamp_ms'),
+        'saved_url': f"/uploads/camera/{meta.get('saved_filename')}",
+        'latest_url': f"/uploads/camera/{meta.get('latest_filename')}",
+    }), 200
+
+
+@app.route('/api/camera/esp32/mjpeg', methods=['GET'])
+def esp32_mjpeg_stream():
+    """MJPEG live stream for a device.
+
+    Usage:
+      <img src="/api/camera/esp32/mjpeg?device_id=esp32cam1">
+    """
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    device_id = _coerce_device_id(request.args.get('device_id') or 'esp32cam')
+
+    @stream_with_context
+    def generate():
+        boundary = b'frame'
+        last_ts = None
+        try:
+            while True:
+                with _esp32_lock:
+                    meta = _esp32_last_frame.get(device_id) or {}
+                    ts_ms = meta.get('timestamp_ms')
+                    jpeg = meta.get('jpeg_bytes')
+
+                if jpeg and ts_ms and ts_ms != last_ts:
+                    last_ts = ts_ms
+                    header = (
+                        b'--' + boundary + b'\r\n'
+                        b'Content-Type: image/jpeg\r\n'
+                        b'Content-Length: ' + str(len(jpeg)).encode('utf-8') + b'\r\n\r\n'
+                    )
+                    yield header + jpeg + b'\r\n'
+
+                time.sleep(0.1)  # ~10 fps max (depends on ESP32 upload rate)
+        except GeneratorExit:
+            return
+
+    resp = Response(generate(), mimetype='multipart/x-mixed-replace; boundary=frame')
+    resp.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    resp.headers['Pragma'] = 'no-cache'
+    return resp
+
+
+@app.route('/api/camera/esp32/capture', methods=['POST'])
+def esp32_capture_snapshot():
+    """Capture a snapshot from the current latest frame and save it under uploads/camera/."""
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    device_id = _coerce_device_id(
+        request.args.get('device_id')
+        or request.headers.get('X-Device-Id')
+        or (request.get_json(silent=True) or {}).get('device_id')
+        or 'esp32cam'
+    )
+
+    latest_name = secure_filename(f"esp32_{device_id}_latest.jpg")
+    latest_path = PROJECT_DIR / 'uploads' / 'camera' / latest_name
+    if not latest_path.exists():
+        return jsonify({'success': False, 'message': 'No ESP32 frame available yet', 'device_id': device_id}), 404
+
+    cam_dir = PROJECT_DIR / 'uploads' / 'camera'
+    os.makedirs(cam_dir, exist_ok=True)
+    ts_ms = int(time.time() * 1000)
+    snap_name = secure_filename(f"esp32_{device_id}_snapshot_{ts_ms}.jpg")
+    snap_path = cam_dir / snap_name
+
+    try:
+        snap_path.write_bytes(latest_path.read_bytes())
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Failed to capture snapshot: {str(e)}'}), 500
+
+    return jsonify({
+        'success': True,
+        'device_id': device_id,
+        'timestamp_ms': ts_ms,
+        'snapshot_url': f'/uploads/camera/{snap_name}',
+    }), 200
+
+
+@app.route('/api/camera/esp32/record', methods=['POST'])
+def esp32_record_recent_video():
+    """Record a short MP4 from recent frames (last N seconds).
+
+    Body (JSON) or query:
+      - device_id (optional)
+      - seconds (10..60, default 30)
+    """
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    payload = request.get_json(silent=True) if request.is_json else (request.form or {})
+    payload = payload or {}
+
+    device_id = payload.get('device_id') or request.args.get('device_id') or 'esp32cam1'
+    seconds = payload.get('seconds') or request.args.get('seconds') or 30
+
+    device_id = _coerce_device_id(device_id)
+    try:
+        seconds = int(seconds)
+        seconds = max(10, min(60, seconds))
+    except Exception:
+        seconds = 30
+
+    frames = _collect_recent_esp32_frames_bytes(device_id, seconds)
+    if len(frames) < 20:
+        return jsonify({
+            'success': False,
+            'message': f'Not enough frames yet from {device_id}. Keep ESP32 streaming for ~{seconds}s and try again.',
+            'device_id': device_id,
+            'frames_found': len(frames),
+        }), 400
+
+    cam_dir = PROJECT_DIR / 'uploads' / 'camera'
+    os.makedirs(cam_dir, exist_ok=True)
+
+    ts = int(time.time() * 1000)
+    base_name = secure_filename(f"esp32_{device_id}_record_{ts}")
+    webm_name = f"{base_name}.webm"
+    mp4_name = f"{base_name}.mp4"
+    # Prefer WebM/VP8 (plays in Chrome/Edge/Firefox). MP4/mp4v often won't play in-browser.
+    video_name = webm_name
+    video_path = cam_dir / video_name
+
+    first = None
+    try:
+        first_arr = np.frombuffer(frames[0][1], np.uint8)
+        first = cv2.imdecode(first_arr, cv2.IMREAD_COLOR)
+    except Exception:
+        first = None
+    if first is None:
+        return jsonify({'success': False, 'message': 'Failed to read first frame'}), 500
+    h, w = first.shape[:2]
+
+    # Estimate FPS from actual frame timestamps so the MP4 timing matches reality.
+    # IMPORTANT: do NOT clamp to >=5 fps; otherwise a low-FPS 30s capture becomes a shorter MP4.
+    try:
+        span_ms = int(frames[-1][0]) - int(frames[0][0])
+        span_s = max(span_ms / 1000.0, 0.25)
+        fps_est = float(len(frames)) / span_s
+    except Exception:
+        span_s = 0.0
+        fps_est = 10.0
+    fps = float(max(1.0, min(30.0, fps_est)))
+    writer = None
+    content_type = 'video/webm'
+    try:
+        fourcc = cv2.VideoWriter_fourcc(*'VP80')
+        writer = cv2.VideoWriter(str(video_path), fourcc, fps, (w, h))
+    except Exception:
+        writer = None
+    if writer is None or not writer.isOpened():
+        # Fallback to MP4
+        content_type = 'video/mp4'
+        video_name = mp4_name
+        video_path = cam_dir / video_name
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        writer = cv2.VideoWriter(str(video_path), fourcc, fps, (w, h))
+        if not writer.isOpened():
+            return jsonify({'success': False, 'message': 'Failed to create video (VP8/mp4v unavailable)'}), 500
+
+    written = 0
+    for _ts_ms, jpg_bytes in frames:
+        img = None
+        try:
+            arr = np.frombuffer(jpg_bytes, np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        except Exception:
+            img = None
+        if img is None:
+            continue
+        if img.shape[1] != w or img.shape[0] != h:
+            img = cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
+        writer.write(img)
+        written += 1
+    writer.release()
+
+    if written < 20:
+        try:
+            video_path.unlink(missing_ok=True)  # type: ignore
+        except Exception:
+            pass
+        return jsonify({'success': False, 'message': 'Failed to build usable video from frames'}), 500
+
+    return jsonify({
+        'success': True,
+        'device_id': device_id,
+        'seconds_requested': seconds,
+        'frames_used': written,
+        'fps': round(float(fps), 2),
+        'fps_est': round(float(fps_est), 3),
+        'duration_est_sec': round(float(span_s), 3),
+        'video_url': f'/uploads/camera/{video_name}',
+        'content_type': content_type,
+    }), 200
+
+
+@app.route('/api/camera/esp32/cataract/latest', methods=['POST'])
+def esp32_cataract_from_latest():
+    """Run cataract inference using the latest ESP32 frame, for a patient.
+
+    Body (JSON) or query:
+      - patient_id (required)
+      - device_id (optional, default esp32cam)
+    """
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    device_id = request.args.get('device_id')
+    patient_id = request.args.get('patient_id')
+
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        device_id = device_id or data.get('device_id')
+        patient_id = patient_id or data.get('patient_id')
+    else:
+        device_id = device_id or request.form.get('device_id')
+        patient_id = patient_id or request.form.get('patient_id')
+
+    device_id = _coerce_device_id(device_id or 'esp32cam')
+    pid = _coerce_patient_id(patient_id)
+    if not pid:
+        return jsonify({'success': False, 'message': 'Patient ID is required (patient_id)'}), 400
+
+    latest_name = secure_filename(f"esp32_{device_id}_latest.jpg")
+    latest_path = PROJECT_DIR / 'uploads' / 'camera' / latest_name
+    if not latest_path.exists():
+        return jsonify({'success': False, 'message': 'No ESP32 frame available yet', 'device_id': device_id}), 404
+
+    try:
+        image_bytes = latest_path.read_bytes()
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Failed to read latest frame: {str(e)}'}), 500
+
+    return _save_and_analyze_cataract_bytes(pid, image_bytes, source=f"esp32_{device_id}")
+
+
+# ============== ESP32 -> DRY EYE (FROM FRAME SEQUENCE) ==============
+def _dryeye_analyze_video_from_mobile_server_algo(video_path: Path):
+    """Blink-based dry-eye screening algorithm.
+
+    Ported from backend/dryeye/mobile_dry_eye_server.py so the unified backend
+    can analyze a short video.
+    """
+    # Keep defaults aligned with mobile_dry_eye_server.py
+    MAX_VIDEO_SECONDS = 60
+    TARGET_FPS = 15
+    # ROI scale is tricky: too small misses eyelid changes, too large adds noise.
+    # We'll auto-select a good ROI scale based on metric variance.
+    ROI_SCALES = (0.35, 0.55, 0.75)
+
+    CANNY_LOW = 40
+    CANNY_HIGH = 120
+    SMOOTH_WINDOW = 7
+
+    THRESH_K_PRIMARY = 0.65
+    THRESH_K_FALLBACK = 0.82
+    MIN_BLINK_MS = 80
+    MAX_BLINK_MS = 350
+    REFRACTORY_MS = 250
+
+    MIN_BLINKS_PER_MIN = 10
+    MAX_IBI_SECONDS = 10.0
+
+    def center_roi(frame_bgr, scale=0.35):
+        h, w = frame_bgr.shape[:2]
+        rh, rw = int(h * scale), int(w * scale)
+        y1 = (h - rh) // 2
+        x1 = (w - rw) // 2
+        return frame_bgr[y1:y1+rh, x1:x1+rw]
+
+    def openness_metric(roi_bgr):
+        gray = cv2.cvtColor(roi_bgr, cv2.COLOR_BGR2GRAY)
+        gray = cv2.GaussianBlur(gray, (5, 5), 0)
+        edges = cv2.Canny(gray, CANNY_LOW, CANNY_HIGH)
+        return float(np.mean(edges > 0))
+
+    def moving_average(values, window):
+        if len(values) == 0:
+            return 0.0
+        if len(values) < window:
+            return float(np.mean(values))
+        return float(np.mean(values[-window:]))
+
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError('Could not open video')
+    src_fps = cap.get(cv2.CAP_PROP_FPS)
+    if not src_fps or src_fps <= 1:
+        src_fps = 30.0
+
+    # If video FPS is low, do not force upsampling; keep effective FPS realistic.
+    desired_fps = float(min(TARGET_FPS, src_fps))
+    frame_step = max(1, int(round(src_fps / desired_fps)))
+    effective_fps = float(max(1.0, src_fps / frame_step))
+    max_frames = int(MAX_VIDEO_SECONDS * effective_fps)
+
+    # Relax blink duration limits for low FPS (blinks can appear longer).
+    if effective_fps < 10.0:
+        MAX_BLINK_MS = 650
+        MIN_BLINK_MS = 60
+
+    # Auto-pick ROI scale using a short warmup segment.
+    # Pick the ROI scale whose openness metric has the highest variance.
+    warmup_frames = int(max(15, min(45, effective_fps * 2.0)))
+    warmup_metrics = {scale: [] for scale in ROI_SCALES}
+    frame_idx = 0
+    kept_idx = 0
+    while kept_idx < warmup_frames:
+        ok, frame = cap.read()
+        if not ok:
+            break
+        frame_idx += 1
+        if (frame_idx % frame_step) != 0:
+            continue
+        for scale in ROI_SCALES:
+            roi = center_roi(frame, scale=scale)
+            warmup_metrics[scale].append(openness_metric(roi))
+        kept_idx += 1
+
+    def _std(values):
+        if not values:
+            return 0.0
+        return float(np.std(np.array(values, dtype=np.float32)))
+
+    chosen_roi_scale = max(ROI_SCALES, key=lambda s: _std(warmup_metrics.get(s, [])))
+    chosen_std = _std(warmup_metrics.get(chosen_roi_scale, []))
+
+    # Reset capture to the start for the actual run.
+    cap.release()
+
+    metrics = []
+    smooth_hist = []
+    baseline = None
+
+    in_blink = False
+    blink_start_ms = None
+    last_blink_end_ms = -10**9
+    blinks_end_times = []
+
+    last_blink_time_sec = None
+    max_ibi = 0.0
+    sum_ibi = 0.0
+    ibi_count = 0
+
+    eye_open_start_sec = 0.0
+    max_eye_open = 0.0
+
+    frame_idx = 0
+    kept_idx = 0
+
+    def _run(thresh_k: float):
+        nonlocal in_blink, blink_start_ms, last_blink_end_ms, blinks_end_times
+        nonlocal last_blink_time_sec, max_ibi, sum_ibi, ibi_count
+        nonlocal eye_open_start_sec, max_eye_open
+        nonlocal frame_idx, kept_idx, metrics, smooth_hist, baseline
+
+        # reset state
+        in_blink = False
+        blink_start_ms = None
+        last_blink_end_ms = -10**9
+        blinks_end_times = []
+
+        last_blink_time_sec = None
+        max_ibi = 0.0
+        sum_ibi = 0.0
+        ibi_count = 0
+
+        eye_open_start_sec = 0.0
+        max_eye_open = 0.0
+
+        frame_idx = 0
+        kept_idx = 0
+        metrics = []
+        smooth_hist = []
+        baseline = None
+
+        def now_sec_from_kept(k):
+            return k / float(effective_fps)
+
+        cap2 = cv2.VideoCapture(str(video_path))
+        if not cap2.isOpened():
+            raise RuntimeError('Could not open video')
+
+        while True:
+            ok, frame = cap2.read()
+            if not ok:
+                break
+            frame_idx += 1
+
+            if (frame_idx % frame_step) != 0:
+                continue
+            if kept_idx >= max_frames:
+                break
+
+            roi = center_roi(frame, scale=chosen_roi_scale)
+            m = openness_metric(roi)
+            metrics.append(m)
+
+            smooth = moving_average(metrics, SMOOTH_WINDOW)
+            smooth_hist.append(smooth)
+            if len(smooth_hist) > 30:
+                baseline = float(np.median(smooth_hist))
+            else:
+                baseline = float(np.mean(smooth_hist))
+
+            thr = baseline * float(thresh_k)
+
+            now_sec = now_sec_from_kept(kept_idx)
+            if not in_blink:
+                open_dur = now_sec - eye_open_start_sec
+                if open_dur > max_eye_open:
+                    max_eye_open = open_dur
+
+            now_ms = int(now_sec * 1000)
+            if not in_blink:
+                if smooth < thr and (now_ms - last_blink_end_ms) > REFRACTORY_MS:
+                    in_blink = True
+                    blink_start_ms = now_ms
+            else:
+                if smooth >= thr:
+                    dur_ms = now_ms - (blink_start_ms or now_ms)
+                    in_blink = False
+                    last_blink_end_ms = now_ms
+
+                    if MIN_BLINK_MS <= dur_ms <= MAX_BLINK_MS:
+                        blinks_end_times.append(now_sec)
+
+                        if last_blink_time_sec is not None:
+                            ibi = now_sec - last_blink_time_sec
+                            max_ibi = max(max_ibi, ibi)
+                            sum_ibi += ibi
+                            ibi_count += 1
+
+                        last_blink_time_sec = now_sec
+                        eye_open_start_sec = now_sec
+
+            kept_idx += 1
+
+        cap2.release()
+
+        duration_sec = kept_idx / float(effective_fps) if kept_idx > 0 else 0.0
+        blink_count = len(blinks_end_times)
+        blink_rate_bpm = blink_count * (60.0 / max(duration_sec, 1e-6))
+        mean_ibi = (sum_ibi / ibi_count) if ibi_count > 0 else 0.0
+
+        risk = (blink_rate_bpm < MIN_BLINKS_PER_MIN) or (max_ibi > MAX_IBI_SECONDS)
+        label = 'Dry Eye Risk' if risk else 'Normal'
+
+        return {
+            'duration_sec': round(duration_sec, 2),
+            'blink_count': int(blink_count),
+            'blink_rate_bpm': round(float(blink_rate_bpm), 2),
+            'mean_ibi_sec': round(float(mean_ibi), 2),
+            'max_ibi_sec': round(float(max_ibi), 2),
+            'max_eye_open_sec': round(float(max_eye_open), 2),
+            'label': label,
+            'debug_effective_fps': round(float(effective_fps), 2),
+            'debug_threshold_k': round(float(thresh_k), 3),
+            'debug_roi_scale': round(float(chosen_roi_scale), 2),
+            'debug_roi_std': round(float(chosen_std), 6),
+        }
+
+    # Primary run
+    primary = _run(THRESH_K_PRIMARY)
+    if primary.get('blink_count', 0) == 0 and float(primary.get('duration_sec', 0.0)) >= 5.0:
+        fallback = _run(THRESH_K_FALLBACK)
+        if fallback.get('blink_count', 0) > 0:
+            return fallback
+    return primary
+
+
+def _collect_recent_esp32_frames(device_id: str, seconds: int):
+    """Return a list of (ts_ms, path) for frames in the last `seconds`."""
+    cam_dir = PROJECT_DIR / 'uploads' / 'camera'
+    if not cam_dir.exists():
+        return []
+
+    prefix = f"esp32_{device_id}_"
+    latest_name = f"esp32_{device_id}_latest.jpg"
+    now_ms = int(time.time() * 1000)
+    cutoff = now_ms - int(seconds * 1000)
+
+    out = []
+    for p in cam_dir.glob(f"{prefix}*.jpg"):
+        if p.name == latest_name:
+            continue
+        try:
+            # filename: esp32_<device>_<ts>.jpg
+            ts_part = p.stem.split('_')[-1]
+            ts_ms = int(ts_part)
+        except Exception:
+            continue
+        if ts_ms >= cutoff:
+            out.append((ts_ms, p))
+
+    out.sort(key=lambda t: t[0])
+    return out
+
+
+def _collect_recent_esp32_frames_bytes(device_id: str, seconds: int):
+    """Return a list of (ts_ms, jpg_bytes) for frames in the last `seconds`.
+
+    Prefers the in-memory ring buffer; falls back to reading files if needed.
+    """
+    device_id = _coerce_device_id(device_id)
+    seconds = int(max(1, seconds))
+    cutoff_ms = int(time.time() * 1000) - int(seconds * 1000)
+
+    with _esp32_lock:
+        buf = list(_esp32_frame_buffer.get(device_id, ()))
+
+    if buf:
+        recent = [(ts, b) for (ts, b) in buf if ts >= cutoff_ms and b]
+        recent.sort(key=lambda t: t[0])
+        return recent
+
+    # Fallback
+    out = []
+    for ts_ms, p in _collect_recent_esp32_frames(device_id, seconds):
+        try:
+            out.append((ts_ms, p.read_bytes()))
+        except Exception:
+            continue
+    return out
+
+
+def _dryeye_mock_analysis(video_path: Path):
+    """TEMPORARY: simulated blink analysis.
+
+    This matches the earlier behavior where blink metrics were generated from duration
+    (not true blink detection). We'll switch back to the real algorithm later.
+    """
+    cap = cv2.VideoCapture(str(video_path))
+    if not cap.isOpened():
+        raise RuntimeError('Could not open video')
+
+    frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+    fps = float(cap.get(cv2.CAP_PROP_FPS) or 0.0)
+    cap.release()
+
+    if fps <= 0.1:
+        fps = 15.0
+    duration = float(frame_count) / float(fps) if frame_count > 0 else 0.0
+
+    blink_count = max(3, int(duration / 3.0)) if duration > 0 else 3
+    blink_rate = (blink_count / duration * 60.0) if duration > 0 else 0.0
+    mean_ibi = (duration / blink_count) if blink_count > 0 else 0.0
+    max_ibi = mean_ibi * 1.5
+    max_eye_open = max_ibi * 0.8
+
+    label = "Dry Eye Risk" if (blink_rate < 10.0 or max_ibi > 10.0) else "Normal"
+
+    return {
+        'duration_sec': round(duration, 2),
+        'blink_count': int(blink_count),
+        'blink_rate_bpm': round(blink_rate, 2),
+        'mean_ibi_sec': round(mean_ibi, 2),
+        'max_ibi_sec': round(max_ibi, 2),
+        'max_eye_open_sec': round(max_eye_open, 2),
+        'label': label,
+        'note': 'TEMP: Simulated dry-eye analysis (will be replaced with real blink detection later).',
+    }
+
+
+@app.route('/api/camera/esp32/dryeye/latest', methods=['POST'])
+def esp32_dryeye_from_recent_frames():
+    """Build a short video from recent ESP32 frames and analyze dry-eye for a patient."""
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    payload = request.get_json(silent=True) if request.is_json else (request.form or {})
+    payload = payload or {}
+
+    patient_id = payload.get('patient_id') or request.args.get('patient_id')
+    device_id = payload.get('device_id') or request.args.get('device_id') or 'esp32cam1'
+    seconds = payload.get('seconds') or request.args.get('seconds') or 30
+
+    pid = _coerce_patient_id(patient_id)
+    if not pid:
+        return jsonify({'success': False, 'message': 'Patient ID is required (patient_id)'}), 400
+
+    device_id = _coerce_device_id(device_id)
+    try:
+        seconds = int(seconds)
+        seconds = max(10, min(60, seconds))
+    except Exception:
+        seconds = 30
+
+    frames = _collect_recent_esp32_frames_bytes(device_id, seconds)
+    if len(frames) < 20:
+        return jsonify({
+            'success': False,
+            'message': f'Not enough frames yet from {device_id}. Keep ESP32 streaming for ~{seconds}s and try again.',
+            'device_id': device_id,
+            'frames_found': len(frames),
+        }), 400
+
+    # Build MP4
+    dryeye_dir = PROJECT_DIR / 'uploads' / 'dryeye'
+    os.makedirs(dryeye_dir, exist_ok=True)
+
+    ts = int(time.time() * 1000)
+    base_name = secure_filename(f"dryeye_esp32_{device_id}_{ts}")
+    webm_name = f"{base_name}.webm"
+    mp4_name = f"{base_name}.mp4"
+    video_name = webm_name
+    video_path = dryeye_dir / video_name
+
+    first = None
+    try:
+        first_arr = np.frombuffer(frames[0][1], np.uint8)
+        first = cv2.imdecode(first_arr, cv2.IMREAD_COLOR)
+    except Exception:
+        first = None
+    if first is None:
+        return jsonify({'success': False, 'message': 'Failed to read first frame'}), 500
+    h, w = first.shape[:2]
+
+    # Estimate FPS from timestamps so timing is correct for blink detection.
+    # IMPORTANT: do NOT clamp to >=5 fps; otherwise a low-FPS 30s capture becomes a shorter MP4.
+    try:
+        span_ms = int(frames[-1][0]) - int(frames[0][0])
+        span_s = max(span_ms / 1000.0, 0.25)
+        fps_est = float(len(frames)) / span_s
+    except Exception:
+        span_s = 0.0
+        fps_est = 10.0
+    fps = float(max(1.0, min(30.0, fps_est)))
+    writer = None
+    content_type = 'video/webm'
+    try:
+        fourcc = cv2.VideoWriter_fourcc(*'VP80')
+        writer = cv2.VideoWriter(str(video_path), fourcc, fps, (w, h))
+    except Exception:
+        writer = None
+    if writer is None or not writer.isOpened():
+        content_type = 'video/mp4'
+        video_name = mp4_name
+        video_path = dryeye_dir / video_name
+        fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+        writer = cv2.VideoWriter(str(video_path), fourcc, fps, (w, h))
+        if not writer.isOpened():
+            return jsonify({'success': False, 'message': 'Failed to create video (VP8/mp4v unavailable)'}), 500
+
+    written = 0
+    for _ts_ms, jpg_bytes in frames:
+        img = None
+        try:
+            arr = np.frombuffer(jpg_bytes, np.uint8)
+            img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+        except Exception:
+            img = None
+        if img is None:
+            continue
+        if img.shape[1] != w or img.shape[0] != h:
+            img = cv2.resize(img, (w, h), interpolation=cv2.INTER_AREA)
+        writer.write(img)
+        written += 1
+    writer.release()
+
+    if written < 20:
+        try:
+            video_path.unlink(missing_ok=True)  # type: ignore
+        except Exception:
+            pass
+        return jsonify({'success': False, 'message': 'Failed to build usable video from frames'}), 500
+
+    try:
+        # TEMP: Use mock analysis for consistent outputs (matches upload path).
+        analysis = _dryeye_mock_analysis(Path(video_path))
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Dry-eye analysis failed: {str(e)}'}), 500
+
+    # Save to DB (same table as normal dryeye)
+    with db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''INSERT INTO dryeye_results 
+                    (patient_id, video_file, duration_sec, blink_count, 
+                     blink_rate_bpm, mean_ibi_sec, max_ibi_sec, max_eye_open_sec, label)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                 (
+                     pid,
+                     video_name,
+                     float(analysis['duration_sec']),
+                     int(analysis['blink_count']),
+                     float(analysis['blink_rate_bpm']),
+                     float(analysis['mean_ibi_sec']),
+                     float(analysis['max_ibi_sec']),
+                     float(analysis['max_eye_open_sec']),
+                     str(analysis['label']),
+                 ))
+        conn.commit()
+        result_id = c.lastrowid
+        conn.close()
+
+    return jsonify({
+        'success': True,
+        'message': 'Dry eye analysis complete',
+        'result_id': result_id,
+        'analysis': analysis,
+        'video_url': f'/uploads/dryeye/{video_name}',
+        'content_type': content_type,
+        'device_id': device_id,
+        'seconds_requested': seconds,
+        'frames_used': written,
+        'fps': round(float(fps), 2),
+        'fps_est': round(float(fps_est), 3),
+        'duration_est_sec': round(float(span_s), 3),
+    }), 200
+
+
+@app.route('/api/camera/esp32/dryeye/analyze_clip', methods=['POST'])
+def esp32_dryeye_analyze_existing_clip():
+    """Analyze a specific already-recorded clip URL (same clip the UI previews).
+
+    Body JSON:
+      - patient_id (required)
+      - clip_url (required): a /uploads/<folder>/<filename> URL
+    """
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    payload = request.get_json(silent=True) if request.is_json else (request.form or {})
+    payload = payload or {}
+
+    patient_id = payload.get('patient_id') or request.args.get('patient_id')
+    clip_url = payload.get('clip_url') or payload.get('video_url') or request.args.get('clip_url')
+
+    pid = _coerce_patient_id(patient_id)
+    if not pid:
+        return jsonify({'success': False, 'message': 'Patient ID is required (patient_id)'}), 400
+    if not clip_url or '/uploads/' not in str(clip_url):
+        return jsonify({'success': False, 'message': 'clip_url must be a /uploads/<folder>/<filename> URL'}), 400
+
+    try:
+        # Accept full absolute URL or path; extract the /uploads/... suffix.
+        clip_url_str = str(clip_url)
+        uploads_idx = clip_url_str.find('/uploads/')
+        rel = clip_url_str[uploads_idx + len('/uploads/'):]
+        parts = rel.split('/')
+        if len(parts) < 2:
+            raise ValueError('Bad uploads URL')
+        folder = parts[0]
+        filename = parts[-1]
+
+        # Safety: strip traversal
+        folder = ''.join(ch for ch in folder if ch.isalnum() or ch in ('-', '_'))
+        filename = secure_filename(filename)
+        if not folder or not filename:
+            raise ValueError('Invalid folder/filename')
+    except Exception:
+        return jsonify({'success': False, 'message': 'Invalid clip_url'}), 400
+
+    # Resolve file from uploads
+    candidates = [
+        PROJECT_DIR / 'uploads' / folder / filename,
+        BASE_DIR / 'uploads' / folder / filename,
+        Path('uploads') / folder / filename,
+    ]
+    clip_path = None
+    for p in candidates:
+        try:
+            if p.exists() and p.is_file():
+                clip_path = p
+                break
+        except Exception:
+            continue
+    if clip_path is None:
+        return jsonify({'success': False, 'message': 'Clip file not found on server'}), 404
+
+    # Copy into uploads/dryeye so reporting/download paths stay consistent.
+    dryeye_dir = PROJECT_DIR / 'uploads' / 'dryeye'
+    os.makedirs(dryeye_dir, exist_ok=True)
+    ts = int(time.time() * 1000)
+    ext = clip_path.suffix.lower() or '.webm'
+    out_name = secure_filename(f"dryeye_clip_{pid}_{ts}{ext}")
+    out_path = dryeye_dir / out_name
+    try:
+        out_path.write_bytes(clip_path.read_bytes())
+    except Exception:
+        # If copy fails, analyze in-place but still reference original filename.
+        out_path = clip_path
+        out_name = filename
+
+    try:
+        # TEMP: Use mock analysis for consistent outputs (matches upload path).
+        analysis = _dryeye_mock_analysis(Path(out_path))
+    except Exception as e:
+        return jsonify({'success': False, 'message': f'Dry-eye analysis failed: {str(e)}'}), 500
+
+    with db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''INSERT INTO dryeye_results 
+                    (patient_id, video_file, duration_sec, blink_count, 
+                     blink_rate_bpm, mean_ibi_sec, max_ibi_sec, max_eye_open_sec, label)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
+                 (
+                     pid,
+                     out_name,
+                     float(analysis['duration_sec']),
+                     int(analysis['blink_count']),
+                     float(analysis['blink_rate_bpm']),
+                     float(analysis['mean_ibi_sec']),
+                     float(analysis['max_ibi_sec']),
+                     float(analysis['max_eye_open_sec']),
+                     str(analysis['label']),
+                 ))
+        conn.commit()
+        result_id = c.lastrowid
+        conn.close()
+
+    return jsonify({
+        'success': True,
+        'message': 'Dry eye analysis complete',
+        'result_id': result_id,
+        'analysis': analysis,
+        'video_url': f'/uploads/dryeye/{out_name}',
+    }), 200
 
 
 # ============== FRONTEND SERVING (OPTIONAL) ==============
@@ -321,6 +1500,29 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(patient_id) REFERENCES patients(id)
         )''')
+
+        # Device bindings (ESP32 device_id -> active patient_id)
+        c.execute('''CREATE TABLE IF NOT EXISTS device_bindings (
+            device_id TEXT PRIMARY KEY,
+            patient_id INTEGER NOT NULL,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(patient_id) REFERENCES patients(id)
+        )''')
+
+        # Glaucoma device results (VL53L1X response metrics)
+        c.execute('''CREATE TABLE IF NOT EXISTS glaucoma_device_results (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER NOT NULL,
+            device_id TEXT,
+            peak_mm REAL,
+            recovery_latency_ms INTEGER,
+            variance REAL,
+            omdi REAL,
+            risk_level TEXT,
+            raw_json TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY(patient_id) REFERENCES patients(id)
+        )''')
         
         conn.commit()
         conn.close()
@@ -442,6 +1644,84 @@ def save_patient():
         'message': 'Patient information saved successfully',
         'patient_id': patient_id
     }), 201
+
+
+@app.route('/api/patients', methods=['GET'])
+def list_patients():
+    """List patients for a user (History view).
+
+    Query params:
+      - user_id (optional int): if provided, only return that user's patients
+
+    Returns:
+      - patients: [{id, user_id, name, age, gender, phone, email, last_screening}]
+    """
+    user_id = request.args.get('user_id')
+    try:
+        user_id_int = int(str(user_id).strip()) if user_id is not None and str(user_id).strip() else None
+    except Exception:
+        user_id_int = None
+
+    with db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+
+        if user_id_int:
+            c.execute('''
+                SELECT
+                    p.id, p.user_id, p.name, p.age, p.gender, p.phone, p.email,
+                    (
+                        SELECT MAX(ts) FROM (
+                            SELECT MAX(timestamp) AS ts FROM cataract_results WHERE patient_id = p.id
+                            UNION ALL
+                            SELECT MAX(timestamp) AS ts FROM dryeye_results WHERE patient_id = p.id
+                            UNION ALL
+                            SELECT MAX(timestamp) AS ts FROM glaucoma_results WHERE patient_id = p.id
+                            UNION ALL
+                            SELECT MAX(timestamp) AS ts FROM glaucoma_device_results WHERE patient_id = p.id
+                        )
+                    ) AS last_screening
+                FROM patients p
+                WHERE p.user_id = ?
+                ORDER BY (last_screening IS NULL) ASC, last_screening DESC, p.id DESC
+            ''', (user_id_int,))
+        else:
+            c.execute('''
+                SELECT
+                    p.id, p.user_id, p.name, p.age, p.gender, p.phone, p.email,
+                    (
+                        SELECT MAX(ts) FROM (
+                            SELECT MAX(timestamp) AS ts FROM cataract_results WHERE patient_id = p.id
+                            UNION ALL
+                            SELECT MAX(timestamp) AS ts FROM dryeye_results WHERE patient_id = p.id
+                            UNION ALL
+                            SELECT MAX(timestamp) AS ts FROM glaucoma_results WHERE patient_id = p.id
+                            UNION ALL
+                            SELECT MAX(timestamp) AS ts FROM glaucoma_device_results WHERE patient_id = p.id
+                        )
+                    ) AS last_screening
+                FROM patients p
+                ORDER BY (last_screening IS NULL) ASC, last_screening DESC, p.id DESC
+            ''')
+
+        rows = c.fetchall()
+        conn.close()
+
+    patients = []
+    for r in rows:
+        patients.append({
+            'id': r['id'],
+            'user_id': r['user_id'],
+            'name': r['name'],
+            'age': r['age'],
+            'gender': r['gender'],
+            'phone': r['phone'],
+            'email': r['email'],
+            'last_screening': r['last_screening'],
+        })
+
+    return jsonify({'success': True, 'patients': patients, 'count': len(patients)}), 200
 
 @app.route('/api/patient/<int:patient_id>', methods=['GET'])
 def get_patient(patient_id):
@@ -615,6 +1895,53 @@ def upload_cataract():
         print(f"[CATARACT] Error: {error_msg}")
         return jsonify({'success': False, 'message': f'Server error: {str(e)}'}), 500
 
+
+@app.route('/api/camera/esp32/ping', methods=['GET'])
+def esp32_ping():
+    """Quick connectivity check for ESP32-CAM firmware."""
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+    return jsonify({'success': True, 'message': 'pong', 'timestamp': datetime.utcnow().isoformat() + 'Z'}), 200
+
+
+@app.route('/api/camera/esp32/cataract', methods=['POST'])
+def esp32_cataract_upload():
+    """ESP32-CAM cataract upload endpoint.
+
+    Accepts:
+    - Raw JPEG/PNG bytes (Content-Type: image/jpeg)
+      patient_id via query (?patient_id=1) or header X-Patient-Id
+    - multipart/form-data with field `image` + `patient_id`
+    - JSON with base64 image field (`frame` or `image_base64`) + `patient_id`
+    """
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    patient_id = (
+        request.args.get('patient_id')
+        or request.headers.get('X-Patient-Id')
+        or request.form.get('patient_id')
+    )
+    if request.is_json:
+        data = request.get_json(silent=True) or {}
+        patient_id = patient_id or data.get('patient_id')
+
+    pid = _coerce_patient_id(patient_id)
+    if not pid:
+        return jsonify({'success': False, 'message': 'Patient ID is required (patient_id)'}), 400
+
+    image_bytes, _ext, err = _extract_image_bytes_from_request()
+    if err or not image_bytes:
+        return jsonify({'success': False, 'message': err or 'No image provided'}), 400
+
+    # Keep payloads reasonable for ESP32 / server memory.
+    if len(image_bytes) > 8 * 1024 * 1024:
+        return jsonify({'success': False, 'message': 'Image too large (> 8MB)'}), 413
+
+    return _save_and_analyze_cataract_bytes(pid, image_bytes, source='esp32')
+
 # ============== DRY EYE SCREENING ==============
 @app.route('/api/dryeye/upload', methods=['POST'])
 def upload_dryeye():
@@ -629,25 +1956,20 @@ def upload_dryeye():
         return jsonify({'success': False, 'message': 'No file selected'}), 400
     
     try:
-        filename = secure_filename(f"dryeye_{int(time.time())}.mp4")
-        filepath = os.path.join('uploads/dryeye', filename)
+        # Save with original extension when possible.
+        orig_ext = os.path.splitext(file.filename or '')[1].lower()
+        if orig_ext not in ('.mp4', '.webm', '.mov', '.avi', '.mkv'):
+            orig_ext = '.mp4'
+
+        dryeye_dir = PROJECT_DIR / 'uploads' / 'dryeye'
+        os.makedirs(dryeye_dir, exist_ok=True)
+
+        filename = secure_filename(f"dryeye_upload_{int(time.time()*1000)}{orig_ext}")
+        filepath = str(dryeye_dir / filename)
         file.save(filepath)
-        
-        # Analyze video (mock analysis for now)
-        cap = cv2.VideoCapture(filepath)
-        frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        fps = cap.get(cv2.CAP_PROP_FPS)
-        duration = frame_count / fps if fps > 0 else 0
-        cap.release()
-        
-        # Generate blink metrics (simulated)
-        blink_count = max(3, int(duration / 3))
-        blink_rate = (blink_count / duration * 60) if duration > 0 else 0
-        mean_ibi = duration / blink_count if blink_count > 0 else 0
-        max_ibi = mean_ibi * 1.5
-        max_eye_open = max_ibi * 0.8
-        
-        label = "Dry Eye Risk" if blink_rate < 10 or max_ibi > 10 else "Normal"
+
+        # TEMP: Use mock analysis for consistent outputs (matches previous behavior)
+        analysis = _dryeye_mock_analysis(Path(filepath))
         
         # Save to database
         with db_lock:
@@ -657,8 +1979,17 @@ def upload_dryeye():
                         (patient_id, video_file, duration_sec, blink_count, 
                          blink_rate_bpm, mean_ibi_sec, max_ibi_sec, max_eye_open_sec, label)
                         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)''',
-                     (patient_id, filename, duration, blink_count, blink_rate,
-                      mean_ibi, max_ibi, max_eye_open, label))
+                     (
+                         patient_id,
+                         filename,
+                         float(analysis['duration_sec']),
+                         int(analysis['blink_count']),
+                         float(analysis['blink_rate_bpm']),
+                         float(analysis['mean_ibi_sec']),
+                         float(analysis['max_ibi_sec']),
+                         float(analysis['max_eye_open_sec']),
+                         str(analysis['label']),
+                     ))
             conn.commit()
             result_id = c.lastrowid
             conn.close()
@@ -667,15 +1998,7 @@ def upload_dryeye():
             'success': True,
             'message': 'Dry eye analysis complete',
             'result_id': result_id,
-            'analysis': {
-                'duration_sec': round(duration, 2),
-                'blink_count': blink_count,
-                'blink_rate_bpm': round(blink_rate, 2),
-                'mean_ibi_sec': round(mean_ibi, 2),
-                'max_ibi_sec': round(max_ibi, 2),
-                'max_eye_open_sec': round(max_eye_open, 2),
-                'label': label
-            },
+            'analysis': analysis,
             'video_url': f'/uploads/dryeye/{filename}'
         }), 200
     
@@ -732,6 +2055,183 @@ def glaucoma_measure():
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
+
+def _get_bound_patient_id(device_id: str) -> Optional[int]:
+    did = _coerce_device_id(device_id)
+    with db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('SELECT patient_id FROM device_bindings WHERE device_id = ? ORDER BY updated_at DESC LIMIT 1', (did,))
+        row = c.fetchone()
+        conn.close()
+    if not row:
+        return None
+    try:
+        return int(row[0])
+    except Exception:
+        return None
+
+
+@app.route('/api/device/bind', methods=['POST'])
+def device_bind_patient():
+    """Bind a device_id to the current patient_id (used by ESP32 device ingestion)."""
+    data = request.get_json(silent=True) or {}
+    device_id = _coerce_device_id(data.get('device_id') or data.get('deviceId') or data.get('id'))
+    pid = _coerce_patient_id(data.get('patient_id') or data.get('patientId'))
+
+    if not device_id:
+        return jsonify({'success': False, 'message': 'device_id required'}), 400
+    if not pid:
+        return jsonify({'success': False, 'message': 'patient_id required'}), 400
+
+    try:
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('INSERT OR REPLACE INTO device_bindings (device_id, patient_id, updated_at) VALUES (?, ?, CURRENT_TIMESTAMP)',
+                      (device_id, pid))
+            conn.commit()
+            conn.close()
+        return jsonify({'success': True, 'message': 'Device bound', 'device_id': device_id, 'patient_id': pid}), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/glaucoma/device', methods=['POST'])
+def glaucoma_device_ingest():
+    """Ingest VL53L1X-based glaucoma response metrics from ESP32 devices.
+
+    Accepts JSON:
+      - device_id (required)
+      - patient_id (optional if device is bound)
+      - peak_mm, recovery_latency_ms, variance, omdi, risk_level
+      - raw_json (optional)
+    """
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    data = request.get_json(silent=True) or {}
+    device_id = _coerce_device_id(data.get('device_id') or data.get('deviceId') or data.get('device'))
+    if not device_id:
+        return jsonify({'success': False, 'message': 'device_id required'}), 400
+
+    pid = _coerce_patient_id(data.get('patient_id') or data.get('patientId'))
+    if not pid:
+        pid = _get_bound_patient_id(device_id)
+    if not pid:
+        return jsonify({'success': False, 'message': 'patient_id required (bind device first)'}), 400
+
+    def _f(key, default=None):
+        v = data.get(key)
+        if v is None:
+            return default
+        try:
+            return float(v)
+        except Exception:
+            return default
+
+    def _i(key, default=None):
+        v = data.get(key)
+        if v is None:
+            return default
+        try:
+            return int(float(v))
+        except Exception:
+            return default
+
+    peak_mm = _f('peak_mm')
+    variance = _f('variance')
+    omdi = _f('omdi')
+    recovery_latency_ms = _i('recovery_latency_ms')
+    risk_level = str(data.get('risk_level') or data.get('risk') or '').strip().upper() or None
+
+    if peak_mm is None or variance is None or omdi is None or recovery_latency_ms is None or not risk_level:
+        return jsonify({'success': False, 'message': 'Missing fields: peak_mm, variance, omdi, recovery_latency_ms, risk_level'}), 400
+
+    raw_json = data.get('raw_json')
+    if raw_json is None:
+        try:
+            raw_json = json.dumps(data, ensure_ascii=False)
+        except Exception:
+            raw_json = None
+
+    try:
+        with db_lock:
+            conn = sqlite3.connect(DB_PATH)
+            c = conn.cursor()
+            c.execute('''INSERT INTO glaucoma_device_results
+                         (patient_id, device_id, peak_mm, recovery_latency_ms, variance, omdi, risk_level, raw_json)
+                         VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                      (pid, device_id, float(peak_mm), int(recovery_latency_ms), float(variance), float(omdi), str(risk_level), raw_json))
+            conn.commit()
+            result_id = c.lastrowid
+            conn.close()
+
+        return jsonify({
+            'success': True,
+            'message': 'Glaucoma device measurement recorded',
+            'result_id': result_id,
+            'analysis': {
+                'patient_id': pid,
+                'device_id': device_id,
+                'peak_mm': float(peak_mm),
+                'recovery_latency_ms': int(recovery_latency_ms),
+                'variance': float(variance),
+                'omdi': float(omdi),
+                'risk_level': str(risk_level),
+            }
+        }), 200
+    except Exception as e:
+        return jsonify({'success': False, 'message': str(e)}), 500
+
+
+@app.route('/api/glaucoma/device/latest', methods=['GET'])
+def glaucoma_device_latest():
+    """Fetch latest glaucoma device result by device_id (preferred) or patient_id."""
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    device_id = request.args.get('device_id') or request.args.get('deviceId')
+    patient_id = request.args.get('patient_id') or request.args.get('patientId')
+
+    did = _coerce_device_id(device_id) if device_id else None
+    pid = _coerce_patient_id(patient_id) if patient_id else None
+    if not pid and did:
+        pid = _get_bound_patient_id(did)
+
+    if not pid and not did:
+        return jsonify({'success': False, 'message': 'Provide device_id or patient_id'}), 400
+
+    where = []
+    args = []
+    if pid:
+        where.append('patient_id = ?')
+        args.append(pid)
+    if did:
+        where.append('device_id = ?')
+        args.append(did)
+
+    q = 'SELECT * FROM glaucoma_device_results'
+    if where:
+        q += ' WHERE ' + ' AND '.join(where)
+    q += ' ORDER BY timestamp DESC LIMIT 1'
+
+    with db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute(q, tuple(args))
+        row = c.fetchone()
+        conn.close()
+
+    if not row:
+        return jsonify({'success': False, 'message': 'No device measurement found'}), 404
+
+    d = dict(row)
+    return jsonify({'success': True, 'result': d}), 200
+
 # ============== HISTORY / RESULTS ==============
 @app.route('/api/results/<result_type>/<int:patient_id>', methods=['GET'])
 def get_results(result_type, patient_id):
@@ -739,7 +2239,8 @@ def get_results(result_type, patient_id):
     tables = {
         'cataract': 'cataract_results',
         'dryeye': 'dryeye_results',
-        'glaucoma': 'glaucoma_results'
+        'glaucoma': 'glaucoma_results',
+        'glaucoma_device': 'glaucoma_device_results'
     }
     
     table = tables.get(result_type)
@@ -835,6 +2336,12 @@ def generate_pdf_report(patient_id):
         story.append(Paragraph("NAYAN-AI", title_style))
         story.append(Paragraph("Comprehensive Eye Screening Report", styles['Heading2']))
         story.append(Paragraph("AI-Assisted Eye Screening System", styles['Normal']))
+        story.append(Spacer(1, 0.1*inch))
+        story.append(Paragraph(
+            "<b>Screening Only:</b> This report is generated for screening support and is not a medical diagnosis. "
+            "Please consult a qualified ophthalmologist for confirmation.",
+            styles['Normal']
+        ))
         story.append(Spacer(1, 0.2*inch))
         
         # Patient Information
@@ -1547,6 +3054,7 @@ def handle_stop_stream():
 @app.route('/uploads/<folder>/<filename>')
 def serve_upload(folder, filename):
     """Serve uploaded files"""
+    import mimetypes
     candidates = [
         PROJECT_DIR / 'uploads' / folder / filename,
         BASE_DIR / 'uploads' / folder / filename,  # legacy: server started inside backend/
@@ -1555,7 +3063,9 @@ def serve_upload(folder, filename):
     for file_path in candidates:
         try:
             if file_path.exists() and file_path.is_file():
-                return send_file(str(file_path))
+                mime, _enc = mimetypes.guess_type(str(file_path))
+                # `conditional=True` enables HTTP range requests, which browsers need for <video>.
+                return send_file(str(file_path), mimetype=(mime or 'application/octet-stream'), conditional=True)
         except Exception:
             continue
     abort(404)
@@ -1636,6 +3146,14 @@ def get_results_legacy(result_type, patient_id):
 
 # ============== RUN SERVER ==============
 if __name__ == '__main__':
+    print("Runtime Python:", sys.executable)
+    print("Python version:", sys.version.replace('\n', ' '))
+    try:
+        import tensorflow as _tf  # type: ignore
+        print("TensorFlow:", getattr(_tf, '__version__', 'unknown'))
+    except Exception as _e:
+        print("TensorFlow: NOT AVAILABLE (", _e, ")")
+
     init_db()
     print("=" * 50)
     print("NAYAN-AI BACKEND SERVER")

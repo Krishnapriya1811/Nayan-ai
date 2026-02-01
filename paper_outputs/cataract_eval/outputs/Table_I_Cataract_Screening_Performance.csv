@@ -1,0 +1,6 @@
+Class,Precision,Recall,F1-score,Support
+Normal,1.0,1.0,1.0,129.0
+Possible Cataract Risk,1.0,1.0,1.0,49.0
+Overall Accuracy,,,1.0,178.0
+Macro Avg,1.0,1.0,1.0,178.0
+Weighted Avg,1.0,1.0,1.0,178.0

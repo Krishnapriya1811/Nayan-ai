@@ -1,0 +1,22 @@
+Dry Eye Screening Outputs
+=========================
+Log: backend\dryeye\dry_eye_log.csv
+Rows in log: 7
+
+Table II:
+- paper_outputs\dryeye_eval\outputs\Table_II_Blink_Metrics_Normal_vs_DryEyeRisk.csv
+- paper_outputs\dryeye_eval\outputs\Table_II_Blink_Metrics_Normal_vs_DryEyeRisk.md
+
+Fig. 10:
+- paper_outputs\dryeye_eval\outputs\Fig_10_Eye_Openness_Signal_With_Detected_Blinks.png
+- paper_outputs\dryeye_eval\outputs\Fig_10_Eye_Openness_Signal_With_Detected_Blinks.csv
+
+Quick summary:
+Normal samples: 1
+Dry Eye Risk samples: 6
+Blink rate (BPM) Normal: 16.45
+Blink rate (BPM) Risk: 6.37 ± 3.01
+Max eye-open (s) Normal: 7.33
+Max eye-open (s) Risk: 15.52 ± 4.85
+
+Fig. 10 generated using video: backend\dryeye\uploads_dryeye\dryeye_20251230_103246.mp4 (detected blinks: 3)

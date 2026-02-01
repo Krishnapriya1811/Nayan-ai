@@ -24,9 +24,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
     
     // List of pages that require login
-    // Glaucoma UI is intentionally excluded (hardware-only).
     const protectedPages = [
         '/index', '/index.html',
+        '/glaucoma', '/glaucoma.html',
         '/cataract', '/cataract.html',
         '/dryeye', '/dryeye.html',
         '/history', '/history.html',

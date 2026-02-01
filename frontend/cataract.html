@@ -24,6 +24,9 @@
                         <a class="nav-link" href="index.html"><i class="bi bi-house-door me-1"></i>Home</a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link" href="glaucoma.html"><i class="bi bi-activity me-1"></i>Glaucoma</a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link active" href="cataract.html"><i class="bi bi-camera me-1"></i>Cataract</a>
                     </li>
                     <li class="nav-item">
@@ -55,9 +58,14 @@
                     <p class="mb-0 opacity-75">AI-Powered Eye Image Analysis using MobileNetV2</p>
                 </div>
                 <div class="col-auto">
-                    <span class="badge bg-dark fs-6">Step 2 of 3</span>
-                </div>
-            </div>
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-outline-secondary btn-lg" id="esp32PreviewBtn" type="button">
+                                    <i class="bi bi-eye me-1"></i>Preview ESP32 Frame
+                                </button>
+                                <button class="btn btn-outline-primary btn-lg" id="esp32AnalyzeBtn" type="button" disabled>
+                                    <i class="bi bi-cpu me-1"></i>Analyze ESP32 Preview
+                                </button>
+                            </div>
         </div>
     </section>
 
@@ -115,6 +123,49 @@
                             <button class="btn btn-warning btn-lg w-100" id="uploadBtn" disabled>
                                 <i class="bi bi-cloud-upload me-1"></i>Upload & Predict
                             </button>
+
+                            <!-- ESP32-CAM Section -->
+                            <hr class="my-4">
+                            <div class="mb-2">
+                                <label for="esp32DeviceId" class="form-label">ESP32-CAM Device ID (optional):</label>
+                                <input type="text" class="form-control" id="esp32DeviceId" value="esp32cam1" placeholder="esp32cam1">
+                                <div class="form-text">ESP32 posts frames to the server; click below to analyze the latest frame for this patient.</div>
+                            </div>
+
+                            <!-- Live stream (MJPEG) -->
+                            <div class="border rounded p-2 bg-light mb-2">
+                                <div class="d-flex justify-content-between align-items-center">
+                                    <div class="fw-bold"><i class="bi bi-broadcast me-1"></i>Live Stream</div>
+                                    <div class="btn-group" role="group">
+                                        <button class="btn btn-sm btn-outline-primary" id="esp32LiveStartBtn" type="button">
+                                            <i class="bi bi-play-fill"></i>
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary" id="esp32LiveStopBtn" type="button" disabled>
+                                            <i class="bi bi-stop-fill"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="mt-2" id="esp32LiveContainer" style="display:none;">
+                                    <img id="esp32LiveImg" alt="ESP32 live" style="width:100%; max-height:320px; object-fit:contain; display:block; background:#000;" />
+                                    <div class="d-grid gap-2 mt-2">
+                                        <button class="btn btn-sm btn-outline-success" id="esp32CaptureBtn" type="button">
+                                            <i class="bi bi-camera me-1"></i>Capture Snapshot
+                                        </button>
+                                    </div>
+                                    <div class="small text-muted mt-2" id="esp32CaptureStatus" style="display:none;"></div>
+                                </div>
+                            </div>
+
+                            <button class="btn btn-outline-primary btn-lg w-100" id="esp32PreviewBtn" type="button">
+                                <i class="bi bi-camera-video me-1"></i>Preview ESP32 Camera (Latest Frame)
+                            </button>
+                            <button class="btn btn-primary btn-lg w-100 mt-2" id="esp32AnalyzeBtn" type="button" disabled>
+                                <i class="bi bi-cpu me-1"></i>Analyze ESP32 Preview
+                            </button>
+                            <button class="btn btn-success btn-lg w-100 mt-2" id="esp32AnalyzeCapturedBtn" type="button" disabled>
+                                <i class="bi bi-check2-square me-1"></i>Analyze Captured Snapshot
+                            </button>
+                            <div class="small text-muted mt-2" id="esp32Status" style="display:none;"></div>
                         </div>
                     </div>
                 </div>
@@ -240,12 +291,12 @@
                 <div class="card-body">
                     <div class="row align-items-center">
                         <div class="col-auto">
-                            <a href="index.html" class="btn btn-outline-primary">
-                                <i class="bi bi-arrow-left me-1"></i>Back: Home
+                            <a href="glaucoma.html" class="btn btn-outline-primary">
+                                <i class="bi bi-arrow-left me-1"></i>Back: Glaucoma
                             </a>
                         </div>
                         <div class="col text-center">
-                            <span class="text-muted">Step 1 of 2</span>
+                            <span class="text-muted">Step 2 of 3</span>
                         </div>
                         <div class="col-auto">
                             <a href="dryeye.html" class="btn btn-info text-white">

@@ -342,6 +342,16 @@ Response:
 
 ### **Using WebSocket for Camera Streaming**
 
+### **ESP32-CAM (recommended: raw JPEG upload)**
+
+If you're using an ESP32-CAM module, the recommended flow is:
+
+- ESP32 uploads frames continuously: `POST /api/camera/esp32/frame?device_id=esp32cam1` (raw `image/jpeg`)
+- Website analyzes the latest frame for the current patient: `POST /api/camera/esp32/cataract/latest`
+
+Reference firmware is in:
+- `esp32/ESP32_CAM_NAYAN_AI/ESP32_CAM_NAYAN_AI.ino`
+
 #### **1. Get Your Laptop IP Address**
 ```bash
 # On Windows

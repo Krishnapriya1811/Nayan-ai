@@ -90,10 +90,15 @@ python -m http.server 8000
 | POST | `/api/patient` | Save patient data |
 | GET | `/api/patient/{id}` | Get patient info |
 | POST | `/api/cataract/upload` | Upload cataract image |
+| POST | `/api/camera/esp32/cataract` | ESP32-CAM cataract snapshot upload |
+| POST | `/api/camera/esp32/frame` | ESP32-CAM upload latest frame (no patient) |
+| GET | `/api/camera/esp32/latest` | ESP32-CAM latest frame URL |
+| POST | `/api/camera/esp32/cataract/latest` | Analyze latest ESP32 frame for patient |
 | POST | `/api/dryeye/upload` | Upload dry eye video |
 | POST | `/api/glaucoma/measure` | Record glaucoma measurement |
 | GET | `/api/results/{type}/{id}` | Get screening results |
 | GET | `/api/health` | Health check |
+| GET | `/api/camera/esp32/ping` | ESP32-CAM connectivity check |
 
 ---
 

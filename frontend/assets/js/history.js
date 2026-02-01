@@ -1,13 +1,32 @@
 // History Page JavaScript
-// Load and display screening results
+// Compact patient history list (name, age, last screening) with actions
 
 // Use same-origin API when served by the backend.
+// If the frontend is opened via Live Server (e.g. :5500) or file://, fall back to Flask backend.
 // NOTE: use `var` so it can be safely re-declared across multiple script files.
-var API_BASE = `${window.location.origin}/api`;
+function resolveApiBase() {
+    const override = (localStorage.getItem('NAYAN_API_BASE') || '').trim();
+    if (override) return override.replace(/\/+$/, '');
 
-let cataractResults = [];
-let dryeyeResults = [];
-let glaucomaResults = [];
+    const proto = String(window.location.protocol || '').toLowerCase();
+    const origin = String(window.location.origin || '');
+    const port = String(window.location.port || '');
+
+    if (proto === 'file:' || origin === 'null' || !origin) {
+        return 'http://localhost:5000/api';
+    }
+
+    // Common dev servers (VS Code Live Server / Vite / React). Backend is typically on 5000.
+    if (port === '5500' || port === '5173' || port === '3000') {
+        return 'http://localhost:5000/api';
+    }
+
+    return `${origin}/api`;
+}
+
+var API_BASE = resolveApiBase();
+
+let patients = [];
 
 document.addEventListener('DOMContentLoaded', function() {
     const userId = sessionStorage.getItem('userId');
@@ -17,83 +36,102 @@ document.addEventListener('DOMContentLoaded', function() {
         return;
     }
 
-    const patientId = sessionStorage.getItem('patientId');
-    if (!patientId) {
-        alert('Please complete patient information first');
-        window.location.href = 'index.html';
-        return;
+    loadPatients();
+
+    const patientSearch = document.getElementById('patientSearch');
+    if (patientSearch) {
+        patientSearch.addEventListener('input', renderPatientsTable);
     }
 
-    // Load results when page loads
-    loadResults();
-
-    // Search handlers (optional)
-    const cataractSearch = document.getElementById('cataractSearch');
-    if (cataractSearch) {
-        cataractSearch.addEventListener('input', () => renderCataractTable());
-    }
-    const dryeyeSearch = document.getElementById('dryeyeSearch');
-    if (dryeyeSearch) {
-        dryeyeSearch.addEventListener('input', () => renderDryeyeTable());
-    }
-    const glaucomaSearch = document.getElementById('glaucomaSearch');
-    if (glaucomaSearch) {
-        glaucomaSearch.addEventListener('input', () => renderGlaucomaTable());
+    const refreshBtn = document.getElementById('refreshPatientsBtn');
+    if (refreshBtn) {
+        refreshBtn.addEventListener('click', loadPatients);
     }
 
-    // Tab switching (reload on tab click to stay fresh)
-    const tabs = document.querySelectorAll('[role="tab"]');
-    tabs.forEach(tab => {
-        tab.addEventListener('click', function() {
-            setTimeout(loadResults, 100);
-        });
+    // Delegate click handlers for dynamic rows
+    document.addEventListener('click', function(e) {
+        const viewBtn = e.target.closest && e.target.closest('[data-action="view-report"]');
+        if (viewBtn) {
+            e.preventDefault();
+            const pid = viewBtn.getAttribute('data-patient-id');
+            const name = viewBtn.getAttribute('data-patient-name') || '';
+            const age = viewBtn.getAttribute('data-patient-age') || '';
+            const gender = viewBtn.getAttribute('data-patient-gender') || '';
+
+            if (pid) {
+                sessionStorage.setItem('patientId', String(pid));
+                sessionStorage.setItem('patientData', JSON.stringify({ name, age, gender }));
+            }
+            window.location.href = 'report.html';
+            return;
+        }
+
+        const dlBtn = e.target.closest && e.target.closest('[data-action="download-report"]');
+        if (dlBtn) {
+            e.preventDefault();
+            const pid = dlBtn.getAttribute('data-patient-id');
+            const name = dlBtn.getAttribute('data-patient-name') || 'Patient';
+            if (pid) {
+                downloadComprehensivePdf(pid, name);
+            }
+        }
     });
 });
 
-function loadResults() {
-    loadCataractRecords();
-    loadDryeyeRecords();
-    loadGlaucomaRecords();
-}
-
-function loadCataractRecords() {
-    const patientId = sessionStorage.getItem('patientId');
-    const container = document.getElementById('cataractTable');
-
+function loadPatients() {
+    const container = document.getElementById('patientsTable');
     if (!container) return;
 
-    fetch(`${API_BASE}/results/cataract/${patientId}`)
-        .then(response => response.json())
-        .then(data => {
-            cataractResults = (data && data.success && Array.isArray(data.results)) ? data.results : [];
-            renderCataractTable();
+    container.innerHTML = `
+        <div class="alert alert-info text-center">
+            <span class="spinner-border spinner-border-sm me-2"></span>Loading patients...
+        </div>
+    `;
+
+    const userId = sessionStorage.getItem('userId');
+    const url = `${API_BASE}/patients?user_id=${encodeURIComponent(userId || '')}`;
+
+    fetch(url)
+        .then(async r => {
+            const contentType = String(r.headers.get('content-type') || '').toLowerCase();
+            const text = await r.text();
+            if (!contentType.includes('application/json')) {
+                throw new Error(
+                    `API did not return JSON. Make sure backend is running at ${API_BASE}. ` +
+                    `If you're using Live Server, open http://localhost:5000/history.html instead.`
+                );
+            }
+            return JSON.parse(text);
         })
-        .catch(error => {
-            console.error('Error:', error);
+        .then(data => {
+            patients = (data && data.success && Array.isArray(data.patients)) ? data.patients : [];
+            renderPatientsTable();
+        })
+        .catch(err => {
+            console.error(err);
             container.innerHTML = `
-                <div class="alert alert-danger">
-                    Error loading cataract records. Backend may not be available.
-                </div>
+                <div class="alert alert-danger">Error loading patient history. Backend may not be available.</div>
             `;
         });
 }
 
-function renderCataractTable() {
-    const container = document.getElementById('cataractTable');
+function renderPatientsTable() {
+    const container = document.getElementById('patientsTable');
     if (!container) return;
 
-    const query = (document.getElementById('cataractSearch')?.value || '').toLowerCase();
-    const filtered = cataractResults.filter(row => {
-        // Handle both object and array formats
-        const label = String(row.label || row[6] || '').toLowerCase();
-        const ts = String(row.timestamp || row[8] || '').toLowerCase();
-        return !query || label.includes(query) || ts.includes(query);
+    const q = String(document.getElementById('patientSearch')?.value || '').trim().toLowerCase();
+    const filtered = patients.filter(p => {
+        const name = String(p.name || '').toLowerCase();
+        const age = String(p.age || '').toLowerCase();
+        const gender = String(p.gender || '').toLowerCase();
+        const ts = String(p.last_screening || '').toLowerCase();
+        return !q || name.includes(q) || age.includes(q) || gender.includes(q) || ts.includes(q);
     });
 
     if (filtered.length === 0) {
         container.innerHTML = `
             <div class="alert alert-info text-center">
-                <i class="bi bi-info-circle me-2"></i>No cataract screening records found.
+                <i class="bi bi-info-circle me-2"></i>No patient history found.
             </div>
         `;
         return;
@@ -101,42 +139,40 @@ function renderCataractTable() {
 
     let html = `
         <div class="table-responsive">
-            <table class="table table-hover">
+            <table class="table table-hover align-middle">
                 <thead class="table-light">
                     <tr>
-                        <th>Date</th>
-                        <th>Contrast</th>
-                        <th>Sharpness</th>
-                        <th>Result</th>
-                        <th>Confidence</th>
-                        <th>Action</th>
+                        <th>Patient</th>
+                        <th style="width: 90px;">Age</th>
+                        <th>Last Screening</th>
+                        <th class="text-end" style="width: 120px;">Actions</th>
                     </tr>
                 </thead>
                 <tbody>
     `;
 
-    filtered.forEach(result => {
-        const timestamp = (result.timestamp || result[8]) ? new Date(result.timestamp || result[8]).toLocaleString() : '--';
-        const contrast = Number(result.contrast || result[3] || 0);
-        const sharpness = Number(result.sharpness || result[4] || 0);
-        const label = String(result.label || result[6] || '');
-        const confidence = Number(result.confidence || result[7] || 0);
-        const imageFile = result.image_file || result[2];
-        const resultClass = label.toLowerCase().includes('risk') ? 'bg-warning text-dark' : 'bg-success';
+    filtered.forEach(p => {
+        const pid = p.id;
+        const name = String(p.name || '--');
+        const age = (p.age !== null && p.age !== undefined && p.age !== '') ? String(p.age) : '--';
+        const gender = String(p.gender || '--');
+        const last = p.last_screening ? new Date(p.last_screening).toLocaleString() : '—';
 
         html += `
             <tr>
-                <td>${timestamp}</td>
-                <td>${Number.isFinite(contrast) ? contrast.toFixed(2) : '--'}</td>
-                <td>${Number.isFinite(sharpness) ? sharpness.toFixed(2) : '--'}</td>
-                <td><span class="badge ${resultClass}">${label}</span></td>
-                <td>${Number.isFinite(confidence) ? confidence.toFixed(1) + '%' : '--'}</td>
                 <td>
-                    ${imageFile ? `
-                        <a href="/uploads/cataract/${imageFile}" target="_blank" class="btn btn-sm btn-primary" title="Download">
-                            <i class="bi bi-download"></i>
-                        </a>
-                    ` : ''}
+                    <div class="fw-semibold">${escapeHtml(name)}</div>
+                    <div class="small text-muted">${escapeHtml(gender)}</div>
+                </td>
+                <td>${escapeHtml(age)}</td>
+                <td>${escapeHtml(last)}</td>
+                <td class="text-end">
+                    <a href="#" class="btn btn-sm btn-outline-primary" title="View full report" data-action="view-report" data-patient-id="${escapeAttr(String(pid))}" data-patient-name="${escapeAttr(name)}" data-patient-age="${escapeAttr(age)}" data-patient-gender="${escapeAttr(gender)}">
+                        <i class="bi bi-eye"></i>
+                    </a>
+                    <a href="#" class="btn btn-sm btn-outline-success ms-2" title="Download PDF" data-action="download-report" data-patient-id="${escapeAttr(String(pid))}" data-patient-name="${escapeAttr(name)}">
+                        <i class="bi bi-download"></i>
+                    </a>
                 </td>
             </tr>
         `;
@@ -151,187 +187,42 @@ function renderCataractTable() {
     container.innerHTML = html;
 }
 
-function loadDryeyeRecords() {
-    const patientId = sessionStorage.getItem('patientId');
-    const container = document.getElementById('dryeyeTable');
+function downloadComprehensivePdf(patientId, patientName) {
+    const safeName = String(patientName || 'Patient').replace(/[^a-z0-9_-]+/gi, '_');
+    const filename = `NAYAN_AI_Report_${safeName}_${new Date().toISOString().split('T')[0]}.pdf`;
 
-    if (!container) return;
-
-    fetch(`${API_BASE}/results/dryeye/${patientId}`)
-        .then(response => response.json())
-        .then(data => {
-            dryeyeResults = (data && data.success && Array.isArray(data.results)) ? data.results : [];
-            renderDryeyeTable();
+    fetch(`${API_BASE}/report/pdf/${encodeURIComponent(patientId)}`)
+        .then(resp => {
+            if (!resp.ok) {
+                throw new Error('Failed to generate PDF');
+            }
+            return resp.blob();
         })
-        .catch(error => {
-            console.error('Error:', error);
-            container.innerHTML = `
-                <div class="alert alert-danger">
-                    Error loading dry eye records. Backend may not be available.
-                </div>
-            `;
+        .then(blob => {
+            const url = window.URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = filename;
+            document.body.appendChild(a);
+            a.click();
+            window.URL.revokeObjectURL(url);
+            document.body.removeChild(a);
+        })
+        .catch(err => {
+            console.error(err);
+            alert('PDF download failed. Please try again.');
         });
 }
 
-function renderDryeyeTable() {
-    const container = document.getElementById('dryeyeTable');
-    if (!container) return;
-
-    const query = (document.getElementById('dryeyeSearch')?.value || '').toLowerCase();
-    const filtered = dryeyeResults.filter(row => {
-        // Handle both object and array formats
-        const label = String(row.label || row[9] || '').toLowerCase();
-        const ts = String(row.timestamp || row[10] || '').toLowerCase();
-        return !query || label.includes(query) || ts.includes(query);
-    });
-
-    if (filtered.length === 0) {
-        container.innerHTML = `
-            <div class="alert alert-info text-center">
-                <i class="bi bi-info-circle me-2"></i>No dry eye screening records found.
-            </div>
-        `;
-        return;
-    }
-
-    let html = `
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead class="table-light">
-                    <tr>
-                        <th>Date</th>
-                        <th>Blinks</th>
-                        <th>Blink Rate (BPM)</th>
-                        <th>Mean IBI (s)</th>
-                        <th>Max Eye Open (s)</th>
-                        <th>Result</th>
-                        <th>Action</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
-
-    filtered.forEach(result => {
-        const timestamp = (result.timestamp || result[10]) ? new Date(result.timestamp || result[10]).toLocaleString() : '--';
-        const blinkCount = Number(result.blinks || result[4] || 0);
-        const blinkRate = Number(result.blink_rate || result[5] || 0);
-        const meanIbi = Number(result.mean_ibi || result[6] || 0);
-        const maxEyeOpen = Number(result.max_eye_open_time || result[8] || 0);
-        const label = String(result.label || result[9] || '');
-        const videoFile = result.video_file || result[2];
-        const resultClass = label.toLowerCase().includes('risk') ? 'bg-warning text-dark' : 'bg-success';
-
-        html += `
-            <tr>
-                <td>${timestamp}</td>
-                <td>${Number.isFinite(blinkCount) ? blinkCount : '--'}</td>
-                <td>${Number.isFinite(blinkRate) ? blinkRate.toFixed(2) : '--'}</td>
-                <td>${Number.isFinite(meanIbi) ? meanIbi.toFixed(2) : '--'}</td>
-                <td>${Number.isFinite(maxEyeOpen) ? maxEyeOpen.toFixed(2) : '--'}</td>
-                <td><span class="badge ${resultClass}">${label}</span></td>
-                <td>
-                    ${videoFile ? `
-                        <a href="/uploads/dryeye/${videoFile}" target="_blank" class="btn btn-sm btn-primary" title="Download">
-                            <i class="bi bi-download"></i>
-                        </a>
-                    ` : ''}
-                </td>
-            </tr>
-        `;
-    });
-
-    html += `
-                </tbody>
-            </table>
-        </div>
-    `;
-
-    container.innerHTML = html;
+function escapeHtml(value) {
+    return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
 }
 
-function loadGlaucomaRecords() {
-    const patientId = sessionStorage.getItem('patientId');
-    const container = document.getElementById('glaucomaTable');
-
-    if (!container) return;
-
-    fetch(`${API_BASE}/results/glaucoma/${patientId}`)
-        .then(response => response.json())
-        .then(data => {
-            glaucomaResults = (data && data.success && Array.isArray(data.results)) ? data.results : [];
-            renderGlaucomaTable();
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            container.innerHTML = `
-                <div class="alert alert-danger">
-                    Error loading glaucoma records. Backend may not be available.
-                </div>
-            `;
-        });
-}
-
-function renderGlaucomaTable() {
-    const container = document.getElementById('glaucomaTable');
-    if (!container) return;
-
-    const query = (document.getElementById('glaucomaSearch')?.value || '').toLowerCase();
-    const filtered = glaucomaResults.filter(row => {
-        // Handle both object and array formats
-        const riskLevel = String(row.risk_level || row[3] || '').toLowerCase();
-        const ts = String(row.timestamp || row[4] || '').toLowerCase();
-        return !query || riskLevel.includes(query) || ts.includes(query);
-    });
-
-    if (filtered.length === 0) {
-        container.innerHTML = `
-            <div class="alert alert-info text-center">
-                <i class="bi bi-info-circle me-2"></i>No glaucoma screening records found.
-            </div>
-        `;
-        return;
-    }
-
-    let html = `
-        <div class="table-responsive">
-            <table class="table table-hover">
-                <thead class="table-light">
-                    <tr>
-                        <th>Date</th>
-                        <th>IOP Measurement</th>
-                        <th>Risk Level</th>
-                        <th>Notes</th>
-                    </tr>
-                </thead>
-                <tbody>
-    `;
-
-    filtered.forEach(result => {
-        const timestamp = (result.timestamp || result[4]) ? new Date(result.timestamp || result[4]).toLocaleString() : '--';
-        const iop = Number(result.iop_proxy || result[2] || 0);
-        const riskLevel = String(result.risk_level || result[3] || '');
-        let resultClass = 'bg-success';
-        if (riskLevel.toLowerCase().includes('high')) {
-            resultClass = 'bg-danger';
-        } else if (riskLevel.toLowerCase().includes('low')) {
-            resultClass = 'bg-info';
-        }
-
-        html += `
-            <tr>
-                <td>${timestamp}</td>
-                <td>${Number.isFinite(iop) ? iop.toFixed(1) + ' mmHg' : '--'}</td>
-                <td><span class="badge ${resultClass}">${riskLevel}</span></td>
-                <td>Tonometer measurement</td>
-            </tr>
-        `;
-    });
-
-    html += `
-                </tbody>
-            </table>
-        </div>
-    `;
-
-    container.innerHTML = html;
+function escapeAttr(value) {
+    return escapeHtml(value).replace(/\n/g, ' ');
 }

@@ -27,6 +27,242 @@ document.addEventListener('DOMContentLoaded', function() {
     const errorAlert = document.getElementById('errorAlert');
     const errorMessage = document.getElementById('errorMessage');
 
+    const esp32PreviewBtn = document.getElementById('esp32PreviewBtn');
+    const esp32AnalyzeBtn = document.getElementById('esp32AnalyzeBtn');
+    const esp32DeviceId = document.getElementById('esp32DeviceId');
+    const esp32Status = document.getElementById('esp32Status');
+
+    const esp32AnalyzeCapturedBtn = document.getElementById('esp32AnalyzeCapturedBtn');
+    const esp32LiveStartBtn = document.getElementById('esp32LiveStartBtn');
+    const esp32LiveStopBtn = document.getElementById('esp32LiveStopBtn');
+    const esp32LiveContainer = document.getElementById('esp32LiveContainer');
+    const esp32LiveImg = document.getElementById('esp32LiveImg');
+    const esp32CaptureBtn = document.getElementById('esp32CaptureBtn');
+    const esp32CaptureStatus = document.getElementById('esp32CaptureStatus');
+
+    let esp32LastPreview = null;
+    let esp32CapturedSnapshotUrl = null;
+    let hwSinceId = 0;
+    let hwInProgress = false;
+
+    let autoNextTimer = null;
+
+    function startAutoNextCountdown(nextUrl, nextLabel, seconds = 10) {
+        if (!nextUrl) return;
+        if (autoNextTimer) {
+            clearInterval(autoNextTimer);
+            autoNextTimer = null;
+        }
+
+        const resultCardEl = document.getElementById('resultCard');
+        const body = resultCardEl ? resultCardEl.querySelector('.card-body') : null;
+        if (!body) return;
+
+        let box = document.getElementById('autoNextBox');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'autoNextBox';
+            box.className = 'alert alert-primary mt-3 mb-0';
+            body.appendChild(box);
+        }
+
+        let remaining = Number(seconds);
+        const render = () => {
+            box.innerHTML = `Next: <strong>${nextLabel}</strong> in <strong>${remaining}s</strong>. ` +
+                `<a href="${nextUrl}" class="alert-link">Go now</a> ` +
+                `<button type="button" class="btn btn-sm btn-outline-primary ms-2" id="autoNextCancelBtn">Cancel</button>`;
+
+            const cancelBtn = document.getElementById('autoNextCancelBtn');
+            if (cancelBtn) {
+                cancelBtn.onclick = () => {
+                    if (autoNextTimer) {
+                        clearInterval(autoNextTimer);
+                        autoNextTimer = null;
+                    }
+                    box.className = 'alert alert-secondary mt-3 mb-0';
+                    box.innerHTML = `Auto-next cancelled. <a href="${nextUrl}" class="alert-link">Go to ${nextLabel}</a>`;
+                };
+            }
+        };
+
+        render();
+        autoNextTimer = setInterval(() => {
+            remaining -= 1;
+            if (remaining <= 0) {
+                clearInterval(autoNextTimer);
+                autoNextTimer = null;
+                window.location.href = nextUrl;
+                return;
+            }
+            render();
+        }, 1000);
+    }
+
+    function getEsp32DeviceIdOrDefault() {
+        return (((esp32DeviceId && esp32DeviceId.value) || 'esp32cam1').trim() || 'esp32cam1');
+    }
+
+    function setCaptureStatus(message, type = 'info') {
+        if (!esp32CaptureStatus) return;
+        esp32CaptureStatus.style.display = 'block';
+        const cls = type === 'error' ? 'text-danger' : (type === 'success' ? 'text-success' : 'text-muted');
+        esp32CaptureStatus.className = `small mt-2 ${cls}`;
+        esp32CaptureStatus.textContent = message;
+    }
+
+    function startEsp32Live() {
+        const deviceId = getEsp32DeviceIdOrDefault();
+        if (esp32LiveContainer) esp32LiveContainer.style.display = 'block';
+        if (esp32LiveImg) {
+            const cb = `cb=${Date.now()}`;
+            esp32LiveImg.src = `${API_BASE}/camera/esp32/mjpeg?device_id=${encodeURIComponent(deviceId)}&${cb}`;
+        }
+        if (esp32LiveStartBtn) esp32LiveStartBtn.disabled = true;
+        if (esp32LiveStopBtn) esp32LiveStopBtn.disabled = false;
+        setCaptureStatus('Live stream started', 'success');
+    }
+
+    function stopEsp32Live() {
+        if (esp32LiveImg) esp32LiveImg.src = '';
+        if (esp32LiveContainer) esp32LiveContainer.style.display = 'none';
+        if (esp32LiveStartBtn) esp32LiveStartBtn.disabled = false;
+        if (esp32LiveStopBtn) esp32LiveStopBtn.disabled = true;
+        setCaptureStatus('Live stream stopped');
+    }
+
+    function captureEsp32Snapshot() {
+        const deviceId = getEsp32DeviceIdOrDefault();
+        if (esp32CaptureBtn) esp32CaptureBtn.disabled = true;
+        if (esp32AnalyzeCapturedBtn) esp32AnalyzeCapturedBtn.disabled = true;
+        setCaptureStatus('Capturing snapshot...');
+
+        return fetch(`${API_BASE}/camera/esp32/capture`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: deviceId })
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (!data.success) {
+                throw new Error(data.message || 'Capture failed');
+            }
+            esp32CapturedSnapshotUrl = data.snapshot_url;
+
+            // Show captured snapshot in the normal preview area
+            const cb = `cb=${Date.now()}`;
+            imagePreview.src = `${esp32CapturedSnapshotUrl}${esp32CapturedSnapshotUrl.includes('?') ? '&' : '?'}${cb}`;
+            fileInfo.textContent = `ESP32 (${deviceId}) captured snapshot`;
+            previewContainer.style.display = 'block';
+
+            setCaptureStatus('Snapshot captured. Ready to analyze.', 'success');
+            if (esp32AnalyzeCapturedBtn) esp32AnalyzeCapturedBtn.disabled = false;
+        })
+        .catch(err => {
+            console.error('ESP32 capture error:', err);
+            setCaptureStatus(err.message || 'Capture failed', 'error');
+            showError('ESP32 capture error:\n' + (err.message || 'Capture failed'));
+            throw err;
+        })
+        .finally(() => {
+            if (esp32CaptureBtn) esp32CaptureBtn.disabled = false;
+        });
+    }
+
+    function analyzeCapturedSnapshot() {
+        if (!esp32CapturedSnapshotUrl) {
+            showError('Capture a snapshot first.');
+            return;
+        }
+
+        const deviceId = getEsp32DeviceIdOrDefault();
+
+        // Show loading
+        loadingCard.style.display = 'block';
+        resultCard.style.display = 'none';
+        initialCard.style.display = 'none';
+        if (esp32AnalyzeCapturedBtn) esp32AnalyzeCapturedBtn.disabled = true;
+        if (esp32AnalyzeBtn) esp32AnalyzeBtn.disabled = true;
+        if (esp32PreviewBtn) esp32PreviewBtn.disabled = true;
+
+        setEsp32Status('Fetching captured snapshot bytes...');
+
+        fetch(esp32CapturedSnapshotUrl)
+            .then(r => r.blob())
+            .then(blob => {
+                setEsp32Status('Analyzing captured snapshot...');
+                return fetch(`${API_BASE}/camera/esp32/cataract?patient_id=${encodeURIComponent(patientId)}&device_id=${encodeURIComponent(deviceId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'image/jpeg' },
+                    body: blob
+                });
+            })
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        throw new Error(`HTTP ${response.status}: ${text}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (data.success) {
+                    setEsp32Status('Captured snapshot analyzed successfully.', 'success');
+                    displayResults(data.analysis, data.image_url);
+                } else {
+                    setEsp32Status(data.message || 'Failed to analyze snapshot', 'error');
+                    showError(data.message || 'Failed to analyze snapshot');
+                }
+            })
+            .catch(err => {
+                console.error('ESP32 analyze snapshot error:', err);
+                setEsp32Status(err.message || 'Failed to analyze snapshot', 'error');
+                showError('ESP32 camera error:\n' + (err.message || 'Failed to analyze snapshot'));
+            })
+            .finally(() => {
+                loadingCard.style.display = 'none';
+                if (esp32AnalyzeCapturedBtn) esp32AnalyzeCapturedBtn.disabled = false;
+                if (esp32AnalyzeBtn) esp32AnalyzeBtn.disabled = false;
+                if (esp32PreviewBtn) esp32PreviewBtn.disabled = false;
+            });
+    }
+
+    function pollHardwareEvents() {
+        const deviceId = getEsp32DeviceIdOrDefault();
+        const url = `${API_BASE}/hardware/poll?device_id=${encodeURIComponent(deviceId)}&since_id=${encodeURIComponent(hwSinceId)}`;
+        fetch(url)
+            .then(r => r.json())
+            .then(async data => {
+                if (!data || !data.success || !data.event) return;
+                if (typeof data.id === 'number') {
+                    hwSinceId = data.id;
+                } else if (data.id) {
+                    hwSinceId = Number(data.id) || hwSinceId;
+                }
+
+                if (String(data.event).toUpperCase() !== 'CATARACT') return;
+                if (hwInProgress) return;
+                hwInProgress = true;
+
+                try {
+                    setCaptureStatus('Hardware CATARACT button detected. Capturing...', 'info');
+                    await captureEsp32Snapshot();
+                    // Auto-analyze immediately for the currently selected patient.
+                    analyzeCapturedSnapshot();
+                } catch (e) {
+                    // errors already surfaced by existing handlers
+                } finally {
+                    // allow next event after a short cooldown
+                    setTimeout(() => { hwInProgress = false; }, 1500);
+                }
+            })
+            .catch(() => {
+                // silent: polling is best-effort
+            });
+    }
+
+    // Poll hardware events so ESP32-WROOM can trigger actions over Wi-Fi
+    setInterval(pollHardwareEvents, 1000);
+
     // Image input change handler
     imageInput.addEventListener('change', function(e) {
         // Reset UI state for a new selection
@@ -83,6 +319,51 @@ document.addEventListener('DOMContentLoaded', function() {
         uploadImage(file);
     });
 
+    // ESP32-CAM: preview first
+    if (esp32PreviewBtn) {
+        esp32PreviewBtn.addEventListener('click', function() {
+            const deviceId = getEsp32DeviceIdOrDefault();
+            previewLatestEsp32Frame(deviceId);
+        });
+    }
+
+    // ESP32-CAM: analyze the preview
+    if (esp32AnalyzeBtn) {
+        esp32AnalyzeBtn.addEventListener('click', function() {
+            if (!patientId) {
+                showError('Patient ID missing. Please complete patient information first.');
+                return;
+            }
+            const deviceId = getEsp32DeviceIdOrDefault();
+            analyzeLatestEsp32Frame(deviceId);
+        });
+    }
+
+    if (esp32LiveStartBtn) {
+        esp32LiveStartBtn.addEventListener('click', startEsp32Live);
+    }
+
+    if (esp32LiveStopBtn) {
+        esp32LiveStopBtn.addEventListener('click', stopEsp32Live);
+    }
+
+    if (esp32CaptureBtn) {
+        esp32CaptureBtn.addEventListener('click', captureEsp32Snapshot);
+    }
+
+    if (esp32AnalyzeCapturedBtn) {
+        esp32AnalyzeCapturedBtn.addEventListener('click', analyzeCapturedSnapshot);
+    }
+
+    // Auto-start live preview when entering the page (if the UI exists)
+    try {
+        if (esp32LiveStartBtn && esp32LiveImg) {
+            startEsp32Live();
+        }
+    } catch (e) {
+        // non-fatal
+    }
+
     function uploadImage(file) {
         // Show loading
         loadingCard.style.display = 'block';
@@ -130,6 +411,102 @@ document.addEventListener('DOMContentLoaded', function() {
             loadingCard.style.display = 'none';
             uploadBtn.disabled = false;
             uploadBtn.innerHTML = '<i class="bi bi-cloud-upload me-1"></i>Upload & Predict';
+        });
+    }
+
+    function setEsp32Status(message, type = 'info') {
+        if (!esp32Status) return;
+        esp32Status.style.display = 'block';
+        const cls = type === 'error' ? 'text-danger' : (type === 'success' ? 'text-success' : 'text-muted');
+        esp32Status.className = `small mt-2 ${cls}`;
+        esp32Status.textContent = message;
+    }
+
+    function previewLatestEsp32Frame(deviceId) {
+        if (errorAlert) errorAlert.style.display = 'none';
+        if (esp32AnalyzeBtn) esp32AnalyzeBtn.disabled = true;
+        setEsp32Status(`Fetching latest frame from ${deviceId}...`);
+
+        fetch(`${API_BASE}/camera/esp32/latest?device_id=${encodeURIComponent(deviceId)}`)
+            .then(response => {
+                if (!response.ok) {
+                    return response.text().then(text => {
+                        throw new Error(`HTTP ${response.status}: ${text}`);
+                    });
+                }
+                return response.json();
+            })
+            .then(data => {
+                if (!data.success) {
+                    throw new Error(data.message || 'No ESP32 frame received yet');
+                }
+
+                // Reuse the existing preview UI
+                const ts = data.timestamp_ms || Date.now();
+                const url = `${data.latest_url}?t=${encodeURIComponent(ts)}`;
+                imagePreview.src = url;
+                fileInfo.textContent = `ESP32 (${deviceId}) latest frame`;
+                previewContainer.style.display = 'block';
+
+                // Remember that we have a valid preview
+                esp32LastPreview = { deviceId, ts };
+                setEsp32Status('Preview ready. Click Analyze to run prediction.', 'success');
+                if (esp32AnalyzeBtn) esp32AnalyzeBtn.disabled = false;
+            })
+            .catch(err => {
+                console.error('ESP32 preview error:', err);
+                setEsp32Status(err.message || 'Failed to fetch ESP32 preview', 'error');
+                showError('ESP32 preview error:\n' + err.message);
+            });
+    }
+
+    function analyzeLatestEsp32Frame(deviceId) {
+        if (errorAlert) errorAlert.style.display = 'none';
+
+        // Show loading
+        loadingCard.style.display = 'block';
+        resultCard.style.display = 'none';
+        initialCard.style.display = 'none';
+        if (esp32AnalyzeBtn) esp32AnalyzeBtn.disabled = true;
+        if (esp32PreviewBtn) esp32PreviewBtn.disabled = true;
+        setEsp32Status(`Requesting latest frame from ${deviceId}...`);
+
+        fetch(`${API_BASE}/camera/esp32/cataract/latest`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            },
+            body: JSON.stringify({
+                patient_id: patientId,
+                device_id: deviceId
+            })
+        })
+        .then(response => {
+            if (!response.ok) {
+                return response.text().then(text => {
+                    throw new Error(`HTTP ${response.status}: ${text}`);
+                });
+            }
+            return response.json();
+        })
+        .then(data => {
+            if (data.success) {
+                setEsp32Status('Frame analyzed successfully.', 'success');
+                displayResults(data.analysis, data.image_url);
+            } else {
+                setEsp32Status(data.message || 'Failed to analyze ESP32 frame', 'error');
+                showError(data.message || 'Failed to analyze ESP32 frame');
+            }
+        })
+        .catch(err => {
+            console.error('ESP32 analyze error:', err);
+            setEsp32Status(err.message || 'Failed to analyze ESP32 frame', 'error');
+            showError('ESP32 camera error:\n' + err.message);
+        })
+        .finally(() => {
+            loadingCard.style.display = 'none';
+            if (esp32AnalyzeBtn) esp32AnalyzeBtn.disabled = false;
+            if (esp32PreviewBtn) esp32PreviewBtn.disabled = false;
         });
     }
 
@@ -200,6 +577,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
         // Update print template
         updatePrintTemplate(analysis);
+
+        // Auto-advance to next screening after 10 seconds
+        startAutoNextCountdown('dryeye.html', 'Dry Eye', 10);
     }
 
     function updatePrintTemplate(analysis) {

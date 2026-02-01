@@ -1,7 +1,9 @@
 // Glaucoma Detection Page JavaScript
-// Hardware sensor integration with backend API
+// VL53L1X ocular response → OMDI workflow (ESP32 device)
 
-const API_BASE = 'http://localhost:5000/api';
+// Use same-origin API when served by the backend.
+// NOTE: use `var` so it can be safely re-declared across multiple script files.
+var API_BASE = `${window.location.origin}/api`;
 
 document.addEventListener('DOMContentLoaded', function() {
     const patientId = sessionStorage.getItem('patientId');
@@ -21,21 +23,141 @@ document.addEventListener('DOMContentLoaded', function() {
     const riskLabel = document.getElementById('riskLabel');
     const riskLabelContainer = document.getElementById('riskLabelContainer');
 
+    const deviceIdInput = document.getElementById('glaucomaDeviceId');
+    const bindDeviceBtn = document.getElementById('bindDeviceBtn');
+
+    const peakMmEl = document.getElementById('peakMm');
+    const recoveryLatencyEl = document.getElementById('recoveryLatency');
+    const varianceEl = document.getElementById('variance');
+    const omdiEl = document.getElementById('omdi');
+
     let autoRefreshInterval = null;
-    let lastIOPValue = null;
+    let lastResultId = null;
+
+    let autoNextTimer = null;
+    let autoNextResultId = null;
+
+    function startAutoNextCountdown(nextUrl, nextLabel, seconds = 10) {
+        if (!nextUrl) return;
+        if (autoNextTimer) {
+            clearInterval(autoNextTimer);
+            autoNextTimer = null;
+        }
+
+        const resultCardEl = document.getElementById('resultCard');
+        const body = resultCardEl ? resultCardEl.querySelector('.card-body') : null;
+        if (!body) return;
+
+        let box = document.getElementById('autoNextBox');
+        if (!box) {
+            box = document.createElement('div');
+            box.id = 'autoNextBox';
+            box.className = 'alert alert-primary mt-3 mb-0';
+            body.appendChild(box);
+        }
+
+        let remaining = Number(seconds);
+        const render = () => {
+            box.innerHTML = `Next: <strong>${nextLabel}</strong> in <strong>${remaining}s</strong>. ` +
+                `<a href="${nextUrl}" class="alert-link">Go now</a> ` +
+                `<button type="button" class="btn btn-sm btn-outline-primary ms-2" id="autoNextCancelBtn">Cancel</button>`;
+
+            const cancelBtn = document.getElementById('autoNextCancelBtn');
+            if (cancelBtn) {
+                cancelBtn.onclick = () => {
+                    if (autoNextTimer) {
+                        clearInterval(autoNextTimer);
+                        autoNextTimer = null;
+                    }
+                    box.className = 'alert alert-secondary mt-3 mb-0';
+                    box.innerHTML = `Auto-next cancelled. <a href="${nextUrl}" class="alert-link">Go to ${nextLabel}</a>`;
+                };
+            }
+        };
+
+        render();
+        autoNextTimer = setInterval(() => {
+            remaining -= 1;
+            if (remaining <= 0) {
+                clearInterval(autoNextTimer);
+                autoNextTimer = null;
+                window.location.href = nextUrl;
+                return;
+            }
+            render();
+        }, 1000);
+    }
 
     // Initialize hardware status
     updateHardwareStatus();
 
-    // Measure button
-    measureBtn.addEventListener('click', function() {
-        takeMeasurement();
+    function getDeviceId() {
+        return String((deviceIdInput && deviceIdInput.value) ? deviceIdInput.value : 'esp32cam1').trim() || 'esp32cam1';
+    }
+
+    async function bindDeviceToPatient() {
+        const deviceId = getDeviceId();
+        const resp = await fetch(`${API_BASE}/device/bind`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ device_id: deviceId, patient_id: patientId })
+        });
+        const data = await resp.json();
+        if (!data.success) {
+            throw new Error(data.message || 'Failed to bind device');
+        }
+        return data;
+    }
+
+    async function fetchLatestDeviceMeasurement() {
+        const deviceId = getDeviceId();
+        const resp = await fetch(`${API_BASE}/glaucoma/device/latest?device_id=${encodeURIComponent(deviceId)}`);
+        const data = await resp.json();
+        if (!data.success) {
+            throw new Error(data.message || 'No device measurement yet');
+        }
+        return data.result;
+    }
+
+    // Measure button (hardware-driven): bind + refresh
+    measureBtn.addEventListener('click', async function() {
+        measureBtn.disabled = true;
+        refreshBtn.disabled = true;
+        const originalText = measureBtn.innerHTML;
+        measureBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Waiting...';
+        try {
+            await bindDeviceToPatient();
+            await refreshMeasurement();
+        } catch (e) {
+            showError(e.message || 'Failed to start');
+        } finally {
+            measureBtn.disabled = false;
+            refreshBtn.disabled = false;
+            measureBtn.innerHTML = originalText;
+        }
     });
 
     // Refresh button
     refreshBtn.addEventListener('click', function() {
-        takeMeasurement();
+        refreshMeasurement();
     });
+
+    if (bindDeviceBtn) {
+        bindDeviceBtn.addEventListener('click', async function() {
+            bindDeviceBtn.disabled = true;
+            const original = bindDeviceBtn.innerHTML;
+            bindDeviceBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Binding...';
+            try {
+                await bindDeviceToPatient();
+                showError('Device bound to patient successfully.', false);
+            } catch (e) {
+                showError(e.message || 'Bind failed');
+            } finally {
+                bindDeviceBtn.disabled = false;
+                bindDeviceBtn.innerHTML = original;
+            }
+        });
+    }
 
     // Auto-refresh toggle
     autoRefreshToggle.addEventListener('change', function() {
@@ -66,112 +188,75 @@ document.addEventListener('DOMContentLoaded', function() {
             });
     }
 
-    function takeMeasurement() {
-        measureBtn.disabled = true;
-        refreshBtn.disabled = true;
-        
-        const originalText = measureBtn.innerHTML;
-        measureBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Measuring...';
-
-        // Simulate IOP measurement (15-25 range typical)
-        const iopValue = 15 + Math.random() * 10;
-
-        fetch(`${API_BASE}/glaucoma/measure`, {
-            method: 'POST',
-            headers: {
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                patient_id: patientId,
-                iop_proxy: iopValue
-            })
-        })
-        .then(response => response.json())
-        .then(data => {
-            if (data.success) {
-                lastIOPValue = data.analysis.iop_proxy;
-                displayMeasurement(data.analysis);
-            } else {
-                alert('Failed to record measurement: ' + data.message);
+    async function refreshMeasurement() {
+        try {
+            if (loadingCard) loadingCard.style.display = 'block';
+            const result = await fetchLatestDeviceMeasurement();
+            if (result && result.id && String(result.id) === String(lastResultId)) {
+                return;
             }
-        })
-        .catch(error => {
-            console.error('Error:', error);
-            alert('Failed to connect to backend. Make sure server is running.');
-        })
-        .finally(() => {
-            measureBtn.disabled = false;
-            refreshBtn.disabled = false;
-            measureBtn.innerHTML = originalText;
-        });
+            lastResultId = result.id;
+            displayMeasurement(result);
+        } catch (e) {
+            // Not fatal: device may not have produced a measurement yet
+            console.warn('No device measurement yet:', e);
+        } finally {
+            if (loadingCard) loadingCard.style.display = 'none';
+        }
     }
 
-    function displayMeasurement(analysis) {
-        const iop = analysis.iop_proxy;
-        const risk = analysis.risk_level;
+    function displayMeasurement(result) {
+        const omdi = Number(result.omdi ?? 0);
+        const risk = String(result.risk_level || result.risk || '--').toUpperCase();
+        const peak = Number(result.peak_mm ?? 0);
+        const trMs = Number(result.recovery_latency_ms ?? 0);
+        const variance = Number(result.variance ?? 0);
+        const deviceId = String(result.device_id || getDeviceId());
+        const ts = result.timestamp ? new Date(result.timestamp).toLocaleString() : new Date().toLocaleString();
 
-        // Update IOP value
-        kProxyValue.textContent = iop.toFixed(1);
+        if (kProxyValue) kProxyValue.textContent = Number.isFinite(omdi) ? omdi.toFixed(3) : '--';
 
-        // Update risk label with color
         riskLabel.textContent = risk;
-        
-        if (risk === 'Low Risk') {
-            riskLabel.className = 'badge fs-5 px-4 py-2 bg-success';
-        } else if (risk === 'Normal') {
-            riskLabel.className = 'badge fs-5 px-4 py-2 bg-info';
-        } else {
+        if (risk.includes('HIGH')) {
             riskLabel.className = 'badge fs-5 px-4 py-2 bg-danger';
+        } else if (risk.includes('MODERATE') || risk.includes('MED')) {
+            riskLabel.className = 'badge fs-5 px-4 py-2 bg-warning text-dark';
+        } else {
+            riskLabel.className = 'badge fs-5 px-4 py-2 bg-success';
         }
+
+        if (document.getElementById('deviceId')) document.getElementById('deviceId').textContent = deviceId;
+        if (peakMmEl) peakMmEl.textContent = Number.isFinite(peak) ? peak.toFixed(3) : '--';
+        if (recoveryLatencyEl) recoveryLatencyEl.textContent = Number.isFinite(trMs) ? String(Math.round(trMs)) : '--';
+        if (varianceEl) varianceEl.textContent = Number.isFinite(variance) ? variance.toFixed(4) : '--';
+        if (omdiEl) omdiEl.textContent = Number.isFinite(omdi) ? omdi.toFixed(3) : '--';
+        if (document.getElementById('timestamp')) document.getElementById('timestamp').textContent = ts;
 
         // Show result card
         resultCard.style.display = 'block';
         resultCard.scrollIntoView({ behavior: 'smooth' });
 
         // Save to session
-        sessionStorage.setItem('glaucomaResults', JSON.stringify(analysis));
+        sessionStorage.setItem('glaucomaDeviceResults', JSON.stringify(result));
 
-        // Update print template
-        updatePrintTemplate(analysis);
-
-        // Update detailed table
-        if (document.getElementById('deviceId')) {
-            document.getElementById('deviceId').textContent = 'ESP32-GLAUCOMA';
-            document.getElementById('deltaMm').textContent = '0.5 mm';
-            document.getElementById('kProxy').textContent = iop.toFixed(2);
-            document.getElementById('timestamp').textContent = new Date().toLocaleString();
+        // Auto-advance only once per unique result id
+        const rid = result && result.id ? String(result.id) : null;
+        if (rid && rid !== autoNextResultId) {
+            autoNextResultId = rid;
+            startAutoNextCountdown('cataract.html', 'Cataract', 10);
         }
     }
 
-    function updatePrintTemplate(analysis) {
-        const patientData = JSON.parse(sessionStorage.getItem('patientData') || '{}');
-
-        // Patient information
-        if (document.getElementById('printPatientName')) {
-            document.getElementById('printPatientName').textContent = patientData.name || '--';
-            document.getElementById('printPatientAge').textContent = patientData.age || '--';
-            document.getElementById('printPatientGender').textContent = patientData.gender || '--';
-            document.getElementById('printDate').textContent = new Date().toLocaleDateString();
-
-            // Test results
-            document.getElementById('printRiskLabel').textContent = analysis.risk_level;
-            const printRiskLabel = document.getElementById('printRiskLabel').parentElement;
-            if (analysis.risk_level && !analysis.risk_level.includes('Normal') && !analysis.risk_level.includes('Low')) {
-                printRiskLabel.style.backgroundColor = '#fff3cd';
-                printRiskLabel.style.borderLeftColor = '#ff9800';
-            } else {
-                printRiskLabel.style.backgroundColor = '#d4edda';
-                printRiskLabel.style.borderLeftColor = '#28a745';
-            }
-
-            // Metrics
-            document.getElementById('printIOP').textContent = analysis.iop_proxy.toFixed(1) + ' mmHg';
-            document.getElementById('printDelta').textContent = '0.5 mm';
-            document.getElementById('printKProxy').textContent = analysis.iop_proxy.toFixed(2);
-
-            // Generated date
-            document.getElementById('printGeneratedDate').textContent = new Date().toLocaleString();
-        }
+    function showError(message, isError = true) {
+        const errorAlert = document.getElementById('errorAlert');
+        const errorMessage = document.getElementById('errorMessage');
+        if (!errorAlert || !errorMessage) return;
+        errorAlert.style.display = 'block';
+        errorAlert.className = isError ? 'alert alert-danger' : 'alert alert-success';
+        errorMessage.textContent = message;
+        setTimeout(() => {
+            errorAlert.style.display = 'none';
+        }, 4000);
     }
 
     // Print functionality
@@ -255,7 +340,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     function startAutoRefresh() {
         autoRefreshInterval = setInterval(() => {
-            takeMeasurement();
+            refreshMeasurement();
         }, 3000);
         console.log('Auto-refresh started (3 seconds interval)');
     }
