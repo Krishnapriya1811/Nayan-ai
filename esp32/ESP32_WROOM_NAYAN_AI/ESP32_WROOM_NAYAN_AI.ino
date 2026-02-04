@@ -28,6 +28,7 @@
 */
 
 #include <Arduino.h>
+#include <math.h>
 #include <Wire.h>
 #include <VL53L1X.h>
 #include <WiFi.h>
@@ -391,6 +392,50 @@ static bool sendGlaucomaResult(float peakMm, uint32_t recoveryLatencyMs, float v
   return httpPostJson(url, body, 2500);
 }
 
+static bool sendGlaucomaStatus(const char* stage, const char* message, float baselineOpt, float progressOpt, const char* levelOpt) {
+  String url = String(BACKEND_BASE) + "/api/glaucoma/device/status";
+  String body;
+  body.reserve(260);
+  body += "{";
+  body += "\"device_id\":\"";
+  body += DEVICE_ID;
+  body += "\",";
+  body += "\"stage\":\"";
+  body += String(stage);
+  body += "\"";
+
+  if (levelOpt && String(levelOpt).length() > 0) {
+    body += ",\"level\":\"";
+    body += String(levelOpt);
+    body += "\"";
+  }
+
+  if (message && String(message).length() > 0) {
+    body += ",\"message\":\"";
+    String m = String(message);
+    m.replace("\\", "\\\\");
+    m.replace("\"", "\\\"");
+    body += m;
+    body += "\"";
+  }
+
+  if (isfinite(baselineOpt)) {
+    body += ",\"baseline_mm\":";
+    body += String(baselineOpt, 2);
+  }
+
+  if (isfinite(progressOpt)) {
+    float p = progressOpt;
+    if (p < 0.0f) p = 0.0f;
+    if (p > 1.0f) p = 1.0f;
+    body += ",\"progress\":";
+    body += String(p, 3);
+  }
+
+  body += "}";
+  return httpPostJson(url, body, 800);
+}
+
 // ===================== GLAUCOMA PIPELINE (STATE MACHINE) =====================
 enum MainState {
   ST_IDLE = 0,
@@ -495,6 +540,9 @@ static void startGlaucomaScan() {
   ledBlinkQuick3x();
   buzzerBeepQuick3x();
 
+  // Live status to UI
+  (void)sendGlaucomaStatus("START", "Starting scan...", NAN, 0.0f, "info");
+
   sampleIdx = 0;
   baselineMm = 0.0f;
   state = ST_GLAUCOMA_BASELINE;
@@ -512,6 +560,7 @@ static void tickGlaucomaBaseline() {
   float mm;
   if (!tofReadMm(mm)) {
     Serial.println("[GLAUCOMA] Sensor timeout during baseline");
+    (void)sendGlaucomaStatus("ERROR", "Sensor timeout during baseline", NAN, NAN, "danger");
     ledSetMode(LED_SLOW_BLINK);
     buzzerSetMode(BUZZER_SLOW_BEEP);
     state = ST_ERROR;
@@ -530,8 +579,14 @@ static void tickGlaucomaBaseline() {
   Serial.print(baselineMm, 2);
   Serial.println(" mm");
 
+  {
+    String msg = String("Baseline: ") + String(baselineMm, 2) + String(" mm");
+    (void)sendGlaucomaStatus("BASELINE", msg.c_str(), baselineMm, 0.25f, "info");
+  }
+
   if (baselineMm < BASELINE_MIN_MM || baselineMm > BASELINE_MAX_MM) {
     Serial.println("[GLAUCOMA] Adjust distance and try again (75..105mm)");
+    (void)sendGlaucomaStatus("DISTANCE_BAD", "Adjust distance and try again (75..105mm)", baselineMm, 0.25f, "warning");
     ledSetMode(LED_SLOW_BLINK);
     buzzerSetMode(BUZZER_SLOW_BEEP);
     state = ST_IDLE;
@@ -543,6 +598,8 @@ static void tickGlaucomaBaseline() {
   state = ST_GLAUCOMA_RESPONSE;
   stateStartMs = millis();
   nextSampleMs = millis();
+
+  (void)sendGlaucomaStatus("RESPONSE", "Measuring ocular response...", baselineMm, 0.35f, "info");
 }
 
 static void tickGlaucomaResponse() {
@@ -553,6 +610,7 @@ static void tickGlaucomaResponse() {
   float mm;
   if (!tofReadMm(mm)) {
     Serial.println("[GLAUCOMA] Sensor timeout during response");
+    (void)sendGlaucomaStatus("ERROR", "Sensor timeout during response", baselineMm, NAN, "danger");
     ledSetMode(LED_SLOW_BLINK);
     buzzerSetMode(BUZZER_SLOW_BEEP);
     state = ST_ERROR;
@@ -560,6 +618,12 @@ static void tickGlaucomaResponse() {
   }
 
   responseBuf[sampleIdx++] = mm - baselineMm;
+
+  // Send a few milestone progress updates (keep HTTP from blocking sampling too often)
+  if (sampleIdx == 1 || sampleIdx == (RESPONSE_SAMPLES / 4) || sampleIdx == (RESPONSE_SAMPLES / 2) || sampleIdx == (3 * RESPONSE_SAMPLES / 4)) {
+    float p = 0.35f + 0.60f * (float)sampleIdx / (float)RESPONSE_SAMPLES;
+    (void)sendGlaucomaStatus("RESPONSE", "Measuring ocular response...", baselineMm, p, "info");
+  }
   if (sampleIdx < RESPONSE_SAMPLES) return;
 
   float peakMm = 0.0f;
@@ -575,6 +639,12 @@ static void tickGlaucomaResponse() {
   Serial.print("Variance: "); Serial.println(variance, 4);
   Serial.print("OMDI: "); Serial.println(omdi, 3);
   Serial.print("Risk: "); Serial.println(risk);
+
+  {
+    String msg = String("Scan done. Risk: ") + String(risk) + String(" | OMDI: ") + String(omdi, 3);
+    const char* level = String(risk).indexOf("HIGH") >= 0 ? "danger" : (String(risk).indexOf("MOD") >= 0 ? "warning" : "success");
+    (void)sendGlaucomaStatus("DONE", msg.c_str(), baselineMm, 1.0f, level);
+  }
 
   // Send results to backend over Wi-Fi
   setHttpOutcome(sendGlaucomaResult(peakMm, recoveryLatencyMs, variance, omdi, risk));

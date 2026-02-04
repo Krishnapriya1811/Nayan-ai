@@ -52,8 +52,18 @@ document.addEventListener('DOMContentLoaded', function() {
     const varianceEl = document.getElementById('variance');
     const omdiEl = document.getElementById('omdi');
 
+    // Live scan status UI
+    const scanStatusBox = document.getElementById('scanStatusBox');
+    const scanStageEl = document.getElementById('scanStage');
+    const scanMessageEl = document.getElementById('scanMessage');
+    const scanMetaEl = document.getElementById('scanMeta');
+    const scanProgressBar = document.getElementById('scanProgressBar');
+
     let autoRefreshInterval = null;
     let lastResultId = null;
+
+    let statusPollInterval = null;
+    let lastStatusId = null;
 
     let autoNextTimer = null;
     let autoNextResultId = null;
@@ -140,6 +150,76 @@ document.addEventListener('DOMContentLoaded', function() {
         return data.result;
     }
 
+    async function fetchLatestDeviceStatus() {
+        const deviceId = getDeviceId();
+        const resp = await fetch(`${API_BASE}/glaucoma/device/status/latest?device_id=${encodeURIComponent(deviceId)}`);
+        const data = await resp.json();
+        if (!data.success) {
+            throw new Error(data.message || 'No status yet');
+        }
+        return data.result;
+    }
+
+    function renderScanStatus(status) {
+        if (!scanStatusBox || !scanStageEl || !scanMessageEl) return;
+
+        if (!status) {
+            scanStatusBox.className = 'alert alert-secondary mb-0';
+            scanStageEl.textContent = 'Waiting…';
+            scanMessageEl.textContent = 'Press the hardware button to start. This box will show baseline and distance guidance.';
+            if (scanMetaEl) scanMetaEl.textContent = '—';
+            if (scanProgressBar) {
+                scanProgressBar.style.width = '0%';
+                scanProgressBar.textContent = '0%';
+            }
+            return;
+        }
+
+        const stage = String(status.stage || 'STATUS').toUpperCase();
+        const level = String(status.level || 'info').toLowerCase();
+        const msg = String(status.message || '').trim();
+
+        let bs = 'secondary';
+        if (level === 'danger') bs = 'danger';
+        else if (level === 'warning') bs = 'warning';
+        else if (level === 'success') bs = 'success';
+        else if (level === 'info') bs = 'info';
+
+        scanStatusBox.className = `alert alert-${bs} mb-0`;
+
+        const stageTitleMap = {
+            'START': 'Starting scan…',
+            'BASELINE': 'Baseline check',
+            'DISTANCE_BAD': 'Adjust distance',
+            'RESPONSE': 'Measuring response…',
+            'DONE': 'Scan complete',
+            'ERROR': 'Device error'
+        };
+        scanStageEl.textContent = stageTitleMap[stage] || stage;
+
+        const baseline = status.baseline_mm;
+        const baselineText = (baseline !== null && baseline !== undefined && baseline !== '')
+            ? `Baseline: ${Number(baseline).toFixed(2)} mm. `
+            : '';
+
+        scanMessageEl.textContent = baselineText + (msg || '—');
+
+        const ts = status.timestamp ? new Date(status.timestamp).toLocaleString() : null;
+        const did = status.device_id ? String(status.device_id) : getDeviceId();
+        if (scanMetaEl) {
+            scanMetaEl.textContent = `Device: ${did}` + (ts ? ` | ${ts}` : '');
+        }
+
+        if (scanProgressBar) {
+            const p = Number(status.progress);
+            if (Number.isFinite(p) && p >= 0) {
+                const pct = Math.max(0, Math.min(100, Math.round(p * 100)));
+                scanProgressBar.style.width = `${pct}%`;
+                scanProgressBar.textContent = `${pct}%`;
+            }
+        }
+    }
+
     // Measure button (hardware-driven): bind + refresh
     measureBtn.addEventListener('click', async function() {
         measureBtn.disabled = true;
@@ -148,6 +228,13 @@ document.addEventListener('DOMContentLoaded', function() {
         measureBtn.innerHTML = '<span class="spinner-border spinner-border-sm me-2"></span>Waiting...';
         try {
             await bindDeviceToPatient();
+            // Begin live status polling immediately after bind.
+            if (statusPollInterval) {
+                clearInterval(statusPollInterval);
+                statusPollInterval = null;
+            }
+            refreshStatus();
+            statusPollInterval = setInterval(refreshStatus, 800);
             await refreshMeasurement();
         } catch (e) {
             showError(e.message || 'Failed to start');
@@ -161,6 +248,7 @@ document.addEventListener('DOMContentLoaded', function() {
     // Refresh button
     refreshBtn.addEventListener('click', function() {
         refreshMeasurement();
+        refreshStatus();
     });
 
     if (bindDeviceBtn) {
@@ -223,6 +311,24 @@ document.addEventListener('DOMContentLoaded', function() {
             console.warn('No device measurement yet:', e);
         } finally {
             if (loadingCard) loadingCard.style.display = 'none';
+        }
+    }
+
+    async function refreshStatus() {
+        try {
+            const st = await fetchLatestDeviceStatus();
+            if (st && st.id && String(st.id) === String(lastStatusId)) {
+                return;
+            }
+            lastStatusId = st && st.id ? String(st.id) : lastStatusId;
+            renderScanStatus(st);
+
+            const stage = st && st.stage ? String(st.stage).toUpperCase() : '';
+            if (stage === 'DISTANCE_BAD') {
+                showError(st.message || 'Adjust distance and try again (75..105mm)', true);
+            }
+        } catch (e) {
+            // ignore transient errors
         }
     }
 
@@ -362,6 +468,7 @@ document.addEventListener('DOMContentLoaded', function() {
     function startAutoRefresh() {
         autoRefreshInterval = setInterval(() => {
             refreshMeasurement();
+            refreshStatus();
         }, 3000);
         console.log('Auto-refresh started (3 seconds interval)');
     }
@@ -372,12 +479,20 @@ document.addEventListener('DOMContentLoaded', function() {
             autoRefreshInterval = null;
             console.log('Auto-refresh stopped');
         }
+
+        if (statusPollInterval) {
+            clearInterval(statusPollInterval);
+            statusPollInterval = null;
+        }
     }
 
     // Start auto-refresh by default
     if (autoRefreshToggle.checked) {
         startAutoRefresh();
     }
+
+    // Initial status render
+    refreshStatus();
 
     // Cleanup on page unload
     window.addEventListener('beforeunload', function() {

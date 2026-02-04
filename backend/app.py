@@ -295,6 +295,11 @@ _hw_event_lock = Lock()
 _hw_event_next_id = 1
 _hw_events = {}  # device_id -> {'id': int, 'event': str, 'ts_ms': int, 'payload': dict}
 
+# Live glaucoma scan status channel (device -> web UI)
+_gl_status_lock = Lock()
+_gl_status_next_id = 1
+_gl_status = {}  # device_id -> latest status dict
+
 # Keep enough frames for "record last N seconds". Default 90s.
 _ESP32_BUFFER_SECONDS = int(os.environ.get('ESP32_BUFFER_SECONDS', '90') or '90')
 _ESP32_MAX_FPS_ASSUME = float(os.environ.get('ESP32_MAX_FPS_ASSUME', '20') or '20')
@@ -1523,6 +1528,20 @@ def init_db():
             timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY(patient_id) REFERENCES patients(id)
         )''')
+
+        # Live glaucoma scan status (baseline, distance warning, progress, done)
+        c.execute('''CREATE TABLE IF NOT EXISTS glaucoma_device_status (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            patient_id INTEGER,
+            device_id TEXT,
+            stage TEXT,
+            level TEXT,
+            message TEXT,
+            baseline_mm REAL,
+            progress REAL,
+            raw_json TEXT,
+            timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        )''')
         
         conn.commit()
         conn.close()
@@ -2231,6 +2250,149 @@ def glaucoma_device_latest():
 
     d = dict(row)
     return jsonify({'success': True, 'result': d}), 200
+
+
+@app.route('/api/glaucoma/device/status', methods=['POST'])
+def glaucoma_device_status_ingest():
+    """Ingest live status updates from ESP32-WROOM during glaucoma scan.
+
+    JSON body (recommended):
+      - device_id (required)
+      - stage (required): START | BASELINE | DISTANCE_BAD | RESPONSE | DONE | ERROR
+      - level (optional): info|success|warning|danger
+      - message (optional): human-readable status
+      - baseline_mm (optional float)
+      - progress (optional float 0..1)
+      - any extra fields allowed (stored as raw_json)
+    """
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    data = request.get_json(silent=True) if request.is_json else (request.form or {})
+    data = data or {}
+
+    device_id = _coerce_device_id(
+        data.get('device_id')
+        or request.args.get('device_id')
+        or request.headers.get('X-Device-Id')
+        or 'esp32cam1'
+    )
+    stage = str(data.get('stage') or '').strip().upper()
+    if not stage:
+        return jsonify({'success': False, 'message': 'stage is required'}), 400
+
+    level = str(data.get('level') or 'info').strip().lower()
+    if level not in ('info', 'success', 'warning', 'danger'):
+        level = 'info'
+
+    message = str(data.get('message') or '').strip()
+    baseline_mm = data.get('baseline_mm')
+    progress = data.get('progress')
+
+    # Resolve patient_id via binding (best-effort)
+    pid = None
+    try:
+        pid = _get_bound_patient_id(device_id)
+    except Exception:
+        pid = None
+
+    # Coerce numerics if provided
+    try:
+        baseline_mm = float(baseline_mm) if baseline_mm is not None and str(baseline_mm) != '' else None
+    except Exception:
+        baseline_mm = None
+    try:
+        progress = float(progress) if progress is not None and str(progress) != '' else None
+    except Exception:
+        progress = None
+
+    raw_json = None
+    try:
+        raw_json = json.dumps(data, ensure_ascii=False)
+    except Exception:
+        raw_json = None
+
+    # Persist
+    with db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        c = conn.cursor()
+        c.execute('''INSERT INTO glaucoma_device_status
+                     (patient_id, device_id, stage, level, message, baseline_mm, progress, raw_json)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)''',
+                  (pid, device_id, stage, level, message, baseline_mm, progress, raw_json))
+        conn.commit()
+        status_id = c.lastrowid
+        conn.close()
+
+    # Cache latest
+    global _gl_status_next_id
+    with _gl_status_lock:
+        sid = int(_gl_status_next_id)
+        _gl_status_next_id += 1
+        _gl_status[device_id] = {
+            'id': status_id,
+            'seq': sid,
+            'device_id': device_id,
+            'patient_id': pid,
+            'stage': stage,
+            'level': level,
+            'message': message,
+            'baseline_mm': baseline_mm,
+            'progress': progress,
+            'ts_ms': int(time.time() * 1000),
+        }
+
+    return jsonify({'success': True, 'device_id': device_id, 'id': status_id}), 200
+
+
+@app.route('/api/glaucoma/device/status/latest', methods=['GET'])
+def glaucoma_device_status_latest():
+    """Fetch latest live glaucoma status by device_id (preferred) or patient_id."""
+    auth_err = _check_device_token_or_reject()
+    if auth_err:
+        return auth_err
+
+    device_id = request.args.get('device_id') or request.args.get('deviceId')
+    patient_id = request.args.get('patient_id') or request.args.get('patientId')
+
+    did = _coerce_device_id(device_id) if device_id else None
+    pid = _coerce_patient_id(patient_id) if patient_id else None
+    if not pid and did:
+        try:
+            pid = _get_bound_patient_id(did)
+        except Exception:
+            pid = None
+
+    if not pid and not did:
+        return jsonify({'success': False, 'message': 'Provide device_id or patient_id'}), 400
+
+    where = []
+    args = []
+    if pid:
+        where.append('patient_id = ?')
+        args.append(pid)
+    if did:
+        where.append('device_id = ?')
+        args.append(did)
+
+    q = 'SELECT * FROM glaucoma_device_status'
+    if where:
+        q += ' WHERE ' + ' AND '.join(where)
+    q += ' ORDER BY timestamp DESC, id DESC LIMIT 1'
+
+    with db_lock:
+        conn = sqlite3.connect(DB_PATH)
+        conn.row_factory = sqlite3.Row
+        c = conn.cursor()
+        c.execute(q, tuple(args))
+        row = c.fetchone()
+        conn.close()
+
+    if not row:
+        return jsonify({'success': True, 'result': None}), 200
+
+    return jsonify({'success': True, 'result': dict(row)}), 200
 
 # ============== HISTORY / RESULTS ==============
 @app.route('/api/results/<result_type>/<int:patient_id>', methods=['GET'])
