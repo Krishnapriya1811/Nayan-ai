@@ -1,7 +1,27 @@
 // Comprehensive Patient Report JavaScript
 // Loads and displays all screening results in one unified report
 
-var API_BASE = `${window.location.origin}/api`;
+window.resolveApiBase = window.resolveApiBase || function resolveApiBase() {
+    const override = (localStorage.getItem('NAYAN_API_BASE') || '').trim();
+    if (override) return override.replace(/\/+$/, '');
+
+    const proto = String(window.location.protocol || '').toLowerCase();
+    const origin = String(window.location.origin || '');
+    const host = String(window.location.hostname || 'localhost');
+    const port = String(window.location.port || '');
+
+    if (proto === 'file:' || origin === 'null' || !origin) {
+        return 'http://localhost:5000/api';
+    }
+
+    if (port === '5500' || port === '5173' || port === '3000') {
+        return `${window.location.protocol}//${host}:5000/api`;
+    }
+
+    return `${origin}/api`;
+};
+
+var API_BASE = window.resolveApiBase();
 
 let patientInfo = null;
 let cataractResults = [];

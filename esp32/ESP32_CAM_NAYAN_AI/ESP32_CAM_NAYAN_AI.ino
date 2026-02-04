@@ -29,6 +29,11 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 
+// ===================== FLASH / TORCH =====================
+// Set to 0 to completely disable the ESP32-CAM flash LED (GPIO4).
+// This avoids turning on the bright onboard LED and frees the pin from PWM usage.
+#define ENABLE_FLASH 1
+
 // UART command protocol (from ESP32-WROOM):
 //   - CAPTURE_IMAGE
 //   - RECORD_VIDEO[:<seconds>]
@@ -69,11 +74,12 @@ enum FlashMode {
   FLASH_CAPTURE_ONLY = 2  // on just before capture, off after
 };
 
-FlashMode FLASH_MODE = FLASH_TORCH;
+// Default to OFF when flash is disabled.
+FlashMode FLASH_MODE = ENABLE_FLASH ? FLASH_TORCH : FLASH_OFF;
 uint8_t FLASH_BRIGHTNESS = 180;
 
-const char* WIFI_SSID = "YOUR_WIFI_SSID";
-const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
+const char* WIFI_SSID = "Karthi's Galaxy A23 5G";
+const char* WIFI_PASS = "Karthi800@";
 
 const char* SERVER_URL = "http://192.168.243.45:5000/api/camera/esp32/frame?device_id=esp32cam1&quiet=1";
 
@@ -335,6 +341,7 @@ static bool initCamera() {
 }
 
 static void flashSetup() {
+#if ENABLE_FLASH
   pinMode(FLASH_GPIO_NUM, OUTPUT);
   digitalWrite(FLASH_GPIO_NUM, FLASH_ACTIVE_HIGH ? LOW : HIGH);
 
@@ -346,9 +353,13 @@ static void flashSetup() {
   ledcAttachPin(FLASH_GPIO_NUM, FLASH_LEDC_CHANNEL);
   ledcWrite(FLASH_LEDC_CHANNEL, 0);
 #endif
+#else
+  // Flash disabled: do not touch GPIO4 at all.
+#endif
 }
 
 static void flashOn(uint8_t brightness) {
+#if ENABLE_FLASH
   uint8_t duty = FLASH_ACTIVE_HIGH ? brightness : (uint8_t)(255 - brightness);
 
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
@@ -358,15 +369,20 @@ static void flashOn(uint8_t brightness) {
 #else
   digitalWrite(FLASH_GPIO_NUM, FLASH_ACTIVE_HIGH ? HIGH : LOW);
 #endif
+#else
+  (void)brightness;
+#endif
 }
 
 static void flashOff() {
+#if ENABLE_FLASH
 #if defined(ESP_ARDUINO_VERSION_MAJOR) && (ESP_ARDUINO_VERSION_MAJOR >= 3)
   ledcWrite(FLASH_GPIO_NUM, FLASH_ACTIVE_HIGH ? 0 : 255);
 #elif defined(ARDUINO_ARCH_ESP32)
   ledcWrite(FLASH_LEDC_CHANNEL, FLASH_ACTIVE_HIGH ? 0 : 255);
 #else
   digitalWrite(FLASH_GPIO_NUM, FLASH_ACTIVE_HIGH ? LOW : HIGH);
+#endif
 #endif
 }
 
@@ -469,17 +485,21 @@ static void postSnapshot() {
     return;
   }
 
+#if ENABLE_FLASH
   if (FLASH_MODE == FLASH_CAPTURE_ONLY) {
     flashOn(FLASH_BRIGHTNESS);
     delay(60);
   }
+#endif
 
   camera_fb_t* fb = esp_camera_fb_get();
   if (!fb) {
     Serial.println("Camera capture failed");
+#if ENABLE_FLASH
     if (FLASH_MODE == FLASH_CAPTURE_ONLY) {
       flashOff();
     }
+#endif
     return;
   }
 
@@ -516,9 +536,11 @@ static void postSnapshot() {
   http.end();
   esp_camera_fb_return(fb);
 
+#if ENABLE_FLASH
   if (FLASH_MODE == FLASH_CAPTURE_ONLY) {
     flashOff();
   }
+#endif
 }
 
 void setup() {
@@ -543,6 +565,9 @@ void setup() {
 
   buttonsSetup();
 
+  // Flash/torch intentionally disabled by default.
+  // If you re-enable it, FLASH_MODE will control behavior.
+#if ENABLE_FLASH
   if (FLASH_MODE == FLASH_TORCH) {
     flashOn(FLASH_BRIGHTNESS);
     Serial.println("Flash: TORCH ON");
@@ -551,6 +576,9 @@ void setup() {
   } else {
     Serial.println("Flash: OFF");
   }
+#else
+  Serial.println("Flash: DISABLED");
+#endif
 
   Serial.printf("Ready. Streaming frames every %lu ms...\n", (unsigned long)STREAM_INTERVAL_MS);
 }

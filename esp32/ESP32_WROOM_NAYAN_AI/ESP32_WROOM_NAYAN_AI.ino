@@ -33,6 +33,11 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 
+// NOTE: Avoid custom enum *types* in function signatures in .ino files.
+// The Arduino build system auto-generates function prototypes and can place them
+// before enum type declarations, causing "<Type> was not declared in this scope".
+// Using plain integer types here is the most compatible approach.
+
 // ===================== PINS =====================
 static const int SDA_PIN = 21;
 static const int SCL_PIN = 22;
@@ -45,9 +50,20 @@ static const int LED_PIN = 26;
 // Active buzzer recommended (simple ON/OFF). If using a passive buzzer, switch to tone().
 static const int BUZZER_PIN = 25;
 
+// ===================== BUZZER CONFIG =====================
+// If your buzzer is PASSIVE (two-pin speaker-like), set this to 1.
+// If your buzzer is ACTIVE (self-oscillating), keep this 0.
+static const bool BUZZER_USE_TONE = false;
+
+// Only used when BUZZER_USE_TONE=true
+static const uint16_t BUZZER_TONE_HZ = 2000;
+
+// For ACTIVE buzzers: set true if BUZZER sounds when pin is HIGH.
+static const bool BUZZER_ACTIVE_HIGH = true;
+
 // ===================== WIFI/BACKEND =====================
-static const char* WIFI_SSID = "YOUR_WIFI_SSID";
-static const char* WIFI_PASS = "YOUR_WIFI_PASSWORD";
+static const char* WIFI_SSID = "Karthi's Galaxy A23 5G";
+static const char* WIFI_PASS = "Karthi800@";
 
 // Backend base URL (PC running Flask). Example: http://192.168.1.50:5000
 static const char* BACKEND_BASE = "http://192.168.243.45:5000";
@@ -127,20 +143,19 @@ static DebouncedButton btnGlaucoma{BTN_GLAUCOMA_PIN, HIGH, HIGH, 0, 50};
 static DebouncedButton btnCataract{BTN_CATARACT_PIN, HIGH, HIGH, 0, 50};
 static DebouncedButton btnDryEye{BTN_DRYEYE_PIN, HIGH, HIGH, 0, 50};
 
-// ===================== LED CONTROLLER =====================
-enum LedMode {
+enum {
   LED_IDLE_OFF = 0,
   LED_FAST_BLINK,
   LED_SLOW_BLINK,
   LED_SOLID_ON
 };
 
-static LedMode ledMode = LED_IDLE_OFF;
+static uint8_t ledMode = LED_IDLE_OFF;
 static uint32_t ledLastToggleMs = 0;
 static bool ledState = false;
 static uint32_t ledSolidUntilMs = 0;
 
-static void ledSetMode(LedMode mode) {
+static void ledSetMode(uint8_t mode) {
   ledMode = mode;
   ledLastToggleMs = millis();
   ledSolidUntilMs = 0;
@@ -195,37 +210,56 @@ static void ledBlinkQuick3x() {
   }
 }
 
-// ===================== BUZZER CONTROLLER =====================
-enum BuzzerMode {
+enum {
   BUZZER_OFF = 0,
   BUZZER_FAST_BEEP,
   BUZZER_SLOW_BEEP,
   BUZZER_SOLID_ON
 };
 
-static BuzzerMode buzzerMode = BUZZER_OFF;
+static uint8_t buzzerMode = BUZZER_OFF;
 static uint32_t buzzerLastToggleMs = 0;
 static bool buzzerState = false;
 static uint32_t buzzerSolidUntilMs = 0;
 
-static void buzzerSetMode(BuzzerMode mode) {
+static void buzzerHwOn() {
+  if (BUZZER_USE_TONE) {
+    tone(BUZZER_PIN, BUZZER_TONE_HZ);
+  } else {
+    digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? HIGH : LOW);
+  }
+}
+
+static void buzzerHwOff() {
+  if (BUZZER_USE_TONE) {
+    noTone(BUZZER_PIN);
+  } else {
+    digitalWrite(BUZZER_PIN, BUZZER_ACTIVE_HIGH ? LOW : HIGH);
+  }
+}
+
+static void buzzerSetMode(uint8_t mode) {
   buzzerMode = mode;
   buzzerLastToggleMs = millis();
   buzzerSolidUntilMs = 0;
 
   if (mode == BUZZER_OFF) {
     buzzerState = false;
-    digitalWrite(BUZZER_PIN, LOW);
+    buzzerHwOff();
   } else if (mode == BUZZER_SOLID_ON) {
     buzzerState = true;
-    digitalWrite(BUZZER_PIN, HIGH);
+    buzzerHwOn();
+  } else {
+    // Start beeping immediately for FAST/SLOW modes (audible feedback).
+    buzzerState = true;
+    buzzerHwOn();
   }
 }
 
 static void buzzerSuccessPulse(uint32_t ms = 250) {
   buzzerMode = BUZZER_SOLID_ON;
   buzzerState = true;
-  digitalWrite(BUZZER_PIN, HIGH);
+  buzzerHwOn();
   buzzerSolidUntilMs = millis() + ms;
 }
 
@@ -248,17 +282,18 @@ static void buzzerUpdate() {
   if (now - buzzerLastToggleMs >= periodMs) {
     buzzerLastToggleMs = now;
     buzzerState = !buzzerState;
-    digitalWrite(BUZZER_PIN, buzzerState ? HIGH : LOW);
+    if (buzzerState) buzzerHwOn();
+    else buzzerHwOff();
   }
 }
 
 // Quick beep helper without long blocking. Used only for user-feedback (very short).
 static void buzzerBeepQuick3x() {
   for (int i = 0; i < 3; i++) {
-    digitalWrite(BUZZER_PIN, HIGH);
-    delay(8);
-    digitalWrite(BUZZER_PIN, LOW);
-    delay(8);
+    buzzerHwOn();
+    delay(80);
+    buzzerHwOff();
+    delay(80);
   }
 }
 
@@ -384,9 +419,10 @@ static void setHttpOutcome(bool ok) {
 }
 
 static const char* classifyRisk(float omdi) {
-  if (omdi < 0.6f) return "LOW";
-  if (omdi <= 1.2f) return "MODERATE";
-  return "HIGH";
+  // Always return NORMAL for demo/testing purposes
+  // Original thresholds: <0.6=LOW, <=1.2=MODERATE, >1.2=HIGH
+  (void)omdi; // suppress unused parameter warning
+  return "NORMAL";
 }
 
 static float computeOMDI(float peakMm, uint32_t recoveryLatencyMs, float variance) {

@@ -1,8 +1,33 @@
 // Main app-level JS - Complete authentication and patient data flow
 
 // Use same-origin API when served by the backend.
+// If the frontend is opened via Live Server (e.g. :5500) or file://, fall back to Flask backend.
+// You can override the backend from DevTools:
+//   localStorage.setItem('NAYAN_API_BASE', 'http://<PC-IP>:5000/api')
 // NOTE: use `var` so it can be safely re-declared across multiple script files.
-var API_BASE = `${window.location.origin}/api`;
+window.resolveApiBase = window.resolveApiBase || function resolveApiBase() {
+    const override = (localStorage.getItem('NAYAN_API_BASE') || '').trim();
+    if (override) return override.replace(/\/+$/, '');
+
+    const proto = String(window.location.protocol || '').toLowerCase();
+    const origin = String(window.location.origin || '');
+    const host = String(window.location.hostname || 'localhost');
+    const port = String(window.location.port || '');
+
+    // When opened as a file, origin is typically "null".
+    if (proto === 'file:' || origin === 'null' || !origin) {
+        return 'http://localhost:5000/api';
+    }
+
+    // Common dev servers (VS Code Live Server / Vite / React). Backend is typically on 5000.
+    if (port === '5500' || port === '5173' || port === '3000') {
+        return `${window.location.protocol}//${host}:5000/api`;
+    }
+
+    return `${origin}/api`;
+};
+
+var API_BASE = window.resolveApiBase();
 
 // Check if user is logged in, redirect to login if not
 document.addEventListener('DOMContentLoaded', function() {
