@@ -81,15 +81,15 @@ uint8_t FLASH_BRIGHTNESS = 180;
 const char* WIFI_SSID = "Karthi's Galaxy A23 5G";
 const char* WIFI_PASS = "Karthi800@";
 
-const char* SERVER_URL = "http://192.168.243.45:5000/api/camera/esp32/frame?device_id=esp32cam1&quiet=1";
+const char* SERVER_URL = "http://192.168.120.45:5000/api/camera/esp32/frame?device_id=esp32cam1&quiet=1";
 
 // Optional: trigger backend capture/record endpoints when commanded over UART.
 // These endpoints exist in backend/app.py.
-const char* CAPTURE_URL = "http://192.168.243.45:5000/api/camera/esp32/capture?device_id=esp32cam1";
-const char* RECORD_URL  = "http://192.168.243.45:5000/api/camera/esp32/record";
-const char* GLAUCOMA_INGEST_URL = "http://192.168.243.45:5000/api/glaucoma/device";
+const char* CAPTURE_URL = "http://192.168.120.45:5000/api/camera/esp32/capture?device_id=esp32cam1";
+const char* RECORD_URL  = "http://192.168.120.45:5000/api/camera/esp32/record";
+const char* GLAUCOMA_INGEST_URL = "http://192.168.120.45:5000/api/glaucoma/device";
 
-const char* HW_EVENT_URL = "http://192.168.243.45:5000/api/hardware/event";
+const char* HW_EVENT_URL = "http://192.168.120.45:5000/api/hardware/event";
 
 const uint32_t STREAM_INTERVAL_MS = 100;
 

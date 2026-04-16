@@ -67,7 +67,7 @@ static const char* WIFI_SSID = "Karthi's Galaxy A23 5G";
 static const char* WIFI_PASS = "Karthi800@";
 
 // Backend base URL (PC running Flask). Example: http://192.168.1.50:5000
-static const char* BACKEND_BASE = "http://192.168.243.45:5000";
+static const char* BACKEND_BASE = "http://192.168.120.45:5000";
 
 // Use the same device_id that the ESP32-CAM uses for streaming frames.
 static const char* DEVICE_ID = "esp32cam1";
